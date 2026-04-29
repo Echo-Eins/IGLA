@@ -23,6 +23,7 @@
 | 10 | [10-verification-rollback.md](10-verification-rollback.md) | Verifier, evidence, обратимость, rollback |
 | 11 | [11-roadmap.md](11-roadmap.md) | Поэтапный план реализации (MVP-0 … MVP-5) |
 | 12 | [12-glossary.md](12-glossary.md) | Глоссарий терминов и сокращений |
+| ⚙ | [ENGINE.md](ENGINE.md) | Карта реализованного слоя: код, конфиги, CLI, тесты |
 
 ## Принципы, которые проходят сквозь всю документацию
 

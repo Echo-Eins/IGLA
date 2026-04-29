@@ -1,0 +1,32 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+.venv/
+venv/
+*.egg-info/
+*.egg
+build/
+dist/
+.tox/
+.nox/
+.eggs/
+
+# Test / coverage
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+coverage.xml
+
+# Editors / IDE
+.vscode/
+.idea/
+*.swp
+
+# IGLA runtime state
+.igla/
+**/.igla/

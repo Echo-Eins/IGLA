@@ -1,0 +1,151 @@
+# IGLA motivation rules.
+#
+# This file is the easily-reworkable layer. Each rule is independent and
+# composes via ``triggers + conditions + effects``. To add new behaviour:
+#
+# * Pick (or implement) condition kinds in ``src/igla/motivation/conditions.py``.
+# * Pick (or implement) effect kinds in ``src/igla/motivation/effects.py``.
+# * Add the rule below.
+#
+# Hard semantics:
+#   - rules with lower ``priority`` run first;
+#   - all matching rules run in order; rules cannot veto each other;
+#   - effects mutate ``TaskRuntimeState`` only.
+#
+# IDs must be unique. Disabling a rule: ``enabled: false``.
+
+version: 1
+
+rules:
+  # ---------------------------------------------------------------------
+  # Mode boot-strapping
+  # ---------------------------------------------------------------------
+  - id: bootstrap_ready_state
+    description: >
+      When a task is created, set the default allowed actions list so the
+      planner has something concrete to choose from on its first turn.
+    priority: 10
+    triggers:
+      - on_event: task_created
+    effects:
+      - kind: set_allowed_actions
+        args:
+          actions:
+            - tool_invocation
+            - ask_user_clarification
+            - todo_branch
+            - todo_complete
+            - declare_task_done
+      - kind: clear_forbidden_actions
+
+  # ---------------------------------------------------------------------
+  # Clarification flow
+  # ---------------------------------------------------------------------
+  - id: enter_clarification_after_ask_user
+    description: >
+      After the planner invokes the ``ask_user`` tool, save the prior
+      operational state and switch to NEEDS_USER_CLARIFICATION. The
+      pause/resume effect pair keeps FAILURE_DIAGNOSIS_REQUIRED intact
+      across clarifications.
+    priority: 50
+    triggers:
+      - on_event: tool_invocation_completed
+    conditions:
+      - kind: tool_called_was
+        args: { name: ask_user }
+      - kind: result_status_was
+        args: { status: success }
+    effects:
+      - kind: pause_for_clarification
+      - kind: log_message
+        args: { message: "Waiting for user clarification" }
+
+  - id: exit_clarification_on_user_input
+    description: >
+      After user_input_received, restore the pre-pause operational state
+      (READY or FAILURE_DIAGNOSIS_REQUIRED).
+    priority: 50
+    triggers:
+      - on_event: user_input_received
+    conditions:
+      - kind: runtime_mode_is
+        args: { mode: needs_user_clarification }
+    effects:
+      - kind: resume_from_clarification
+
+  # ---------------------------------------------------------------------
+  # Failure diagnosis flow
+  # ---------------------------------------------------------------------
+  - id: enter_failure_diagnosis_on_step_failure
+    description: >
+      When a tool invocation fails, freeze the planner in
+      FAILURE_DIAGNOSIS_REQUIRED and force diagnostic actions.
+    priority: 30
+    triggers:
+      - on_event: tool_invocation_failed
+      - on_event: step_failed
+    effects:
+      - kind: set_mode
+        args: { mode: failure_diagnosis_required }
+      - kind: set_allowed_actions
+        args:
+          actions:
+            - ask_user_clarification
+            - todo_branch
+            - todo_complete
+      - kind: set_forbidden_actions
+        args:
+          actions:
+            - tool_invocation
+            - declare_task_done
+      - kind: clear_flags
+        args:
+          flags: [failure_classified, changed_condition_declared]
+      - kind: log_message
+        args: { message: "Entered FAILURE_DIAGNOSIS_REQUIRED" }
+
+  - id: exit_failure_diagnosis_when_classified
+    description: >
+      Leave failure diagnosis when the planner has classified the failure
+      AND declared a changed condition (both flags set).
+    priority: 40
+    triggers:
+      - on_event: tool_invocation_completed
+      - on_event: user_input_received
+    conditions:
+      - kind: runtime_mode_is
+        args: { mode: failure_diagnosis_required }
+      - kind: all_flags_set
+        args: { flags: [failure_classified, changed_condition_declared] }
+    effects:
+      - kind: set_mode
+        args: { mode: ready }
+      - kind: clear_flags
+        args: { flags: [failure_classified, changed_condition_declared] }
+      - kind: set_allowed_actions
+        args:
+          actions:
+            - tool_invocation
+            - ask_user_clarification
+            - todo_branch
+            - todo_complete
+            - declare_task_done
+      - kind: clear_forbidden_actions
+      - kind: log_message
+        args: { message: "Exiting FAILURE_DIAGNOSIS_REQUIRED" }
+
+  # ---------------------------------------------------------------------
+  # Task completion
+  # ---------------------------------------------------------------------
+  - id: task_done_on_declare
+    description: When the planner emits declare_task_done, end the task.
+    priority: 100
+    triggers:
+      - on_event: task_completed
+    effects:
+      - kind: set_mode
+        args: { mode: task_done }
+      - kind: set_allowed_actions
+        args: { actions: [] }
+      - kind: log_message
+        args: { message: "Task done" }

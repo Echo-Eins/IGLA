@@ -1,0 +1,25 @@
+"""Planner — turns user intent into typed proposals via an LLM.
+
+Public entry: ``Planner``. Construct it with a kernel + LLM client + policy
+engine + motivation cycle + todo store. ``Planner.run_task`` drives one
+task end-to-end through the proposal/policy/execution loop.
+"""
+from .llm_client import (
+    LLMChatMessage,
+    LLMClient,
+    LMStudioClient,
+    OfflineCannedClient,
+)
+from .planner import Planner, PlannerOutcome
+from .prompts import build_proposal_messages, build_proposal_schema
+
+__all__ = [
+    "LLMChatMessage",
+    "LLMClient",
+    "LMStudioClient",
+    "OfflineCannedClient",
+    "Planner",
+    "PlannerOutcome",
+    "build_proposal_messages",
+    "build_proposal_schema",
+]

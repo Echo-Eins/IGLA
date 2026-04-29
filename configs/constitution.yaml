@@ -1,0 +1,39 @@
+# IGLA constitution: hard, kernel-level invariants.
+#
+# Each entry references a predicate registered in
+# ``src/igla/policies/predicates.py``. To disable an entry, set
+# ``enabled: false``. Disabling these in production is unsupported; use
+# only for diagnostics. To add a new predicate:
+#
+# 1. Implement and ``register_predicate(...)`` in predicates.py.
+# 2. Append an entry here.
+#
+# Order matters only for which rejection is reported first; all enabled
+# predicates are evaluated until one denies.
+version: 1
+
+predicates:
+  - id: registry_known_tool
+    enabled: true
+    rule_id: registry_known_tool
+  - id: schema_validated
+    enabled: true
+    rule_id: schema_validated
+  - id: todo_node_exists
+    enabled: true
+    rule_id: todo_node_exists
+  - id: max_iterations
+    enabled: true
+    rule_id: max_iterations
+  - id: max_consecutive_rejections
+    enabled: true
+    rule_id: max_consecutive_rejections
+  - id: clarification_depth
+    enabled: true
+    rule_id: clarification_depth
+  - id: allowed_actions_respected
+    enabled: true
+    rule_id: allowed_actions_respected
+  - id: no_blind_retry
+    enabled: true
+    rule_id: no_blind_retry
