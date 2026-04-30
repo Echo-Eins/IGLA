@@ -21,9 +21,9 @@ class LMStudioSettings(BaseModel):
     api_key: str = "lm-studio"
     model: str = "local-model"
     request_timeout_s: float = 120.0
-    temperature: float = 0.0
+    temperature: float = 0.15
     top_p: float = 1.0
-    max_tokens: int = 2048
+    max_tokens: int = 4096
     # When False the planner falls back to plain JSON parsing instead of
     # the OpenAI-style ``response_format=json_schema`` request.
     use_json_schema_response: bool = True

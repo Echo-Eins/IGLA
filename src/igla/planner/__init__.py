@@ -11,7 +11,13 @@ from .llm_client import (
     OfflineCannedClient,
 )
 from .planner import Planner, PlannerOutcome
-from .prompts import build_proposal_messages, build_proposal_schema
+from .prompts import (
+    build_proposal_messages,
+    build_proposal_schema,
+    build_session_system_message,
+    build_task_system_message,
+    build_turn_user_message,
+)
 
 __all__ = [
     "LLMChatMessage",
@@ -22,4 +28,7 @@ __all__ = [
     "PlannerOutcome",
     "build_proposal_messages",
     "build_proposal_schema",
+    "build_session_system_message",
+    "build_task_system_message",
+    "build_turn_user_message",
 ]

@@ -51,8 +51,15 @@ from ..protocol.task import TaskSpec, TaskStatus
 from ..protocol.todo import TodoNodeKind, TodoStatus
 from ..todo.store import TodoStore
 from ..todo.tree import TodoTree
-from .llm_client import LLMClient
-from .prompts import build_proposal_messages, build_proposal_schema, render_event_tail
+from .llm_client import LLMChatMessage, LLMClient
+from .prompts import (
+    build_proposal_messages,
+    build_proposal_schema,
+    build_session_system_message,
+    build_task_system_message,
+    render_event_tail,
+    tools_digest_from_registry_dump,
+)
 
 
 @dataclass
@@ -87,6 +94,16 @@ class Planner:
         self._todo_store = todo_store
         self._llm = llm
         self._proposal_schema = build_proposal_schema()
+        # KV-cache friendly prompt assembly:
+        # * session system message — stable across all tasks; rebuilt only
+        #   when the registered tools list changes.
+        # * task system message — stable across all turns of one task.
+        # * event index — last EventStore index already sent to the LLM;
+        #   subsequent turns send only the delta.
+        self._cached_session_msg: LLMChatMessage | None = None
+        self._cached_session_tools_signature: tuple[tuple[str, str], ...] | None = None
+        self._cached_task_msgs: dict[str, LLMChatMessage] = {}
+        self._last_event_index_sent: dict[str, int] = {}
 
     # --- public API -----------------------------------------------------
 
@@ -246,8 +263,13 @@ class Planner:
         snapshot = todo.snapshot()
         runtime_snapshot = kernel.state.get_state(task.task_id).snapshot(kernel.clock)
         events = kernel.events.list_by_task(task.task_id)
-        tail = render_event_tail(events, limit=12)
-        tools = [
+
+        # Event delta: only events the model has not seen yet.
+        since = self._last_event_index_sent.get(task.task_id, 0)
+        new_events = render_event_tail(events, since_index=since)
+
+        # Session-level system message: rebuilt only when the registry changes.
+        tools_dump = [
             {
                 "name": m.name,
                 "version": m.version,
@@ -258,21 +280,54 @@ class Planner:
             }
             for m in kernel.registry.list_tools()
         ]
+        signature = tuple(sorted((t["name"], t["version"]) for t in tools_dump))
+        if (
+            self._cached_session_msg is None
+            or self._cached_session_tools_signature != signature
+        ):
+            self._cached_session_msg = build_session_system_message(
+                tools_digest_from_registry_dump(tools_dump)
+            )
+            self._cached_session_tools_signature = signature
+
+        # Task-level system message: cached per task_id.
+        task_msg = self._cached_task_msgs.get(task.task_id)
+        if task_msg is None:
+            task_msg = build_task_system_message(task)
+            self._cached_task_msgs[task.task_id] = task_msg
 
         messages = build_proposal_messages(
             task=task,
             runtime=runtime_snapshot,
             todo=snapshot,
             last_decision=last_decision,
-            last_event_log_tail=tail,
-            available_tools=tools,
+            new_events=new_events,
+            available_tools=tools_dump,
+            cached_session_message=self._cached_session_msg,
+            cached_task_message=task_msg,
         )
+        # Telemetry: we want to see prefix vs delta sizes when comparing
+        # before/after KV-cache wins. Keep the payload tiny — this lands in
+        # every iteration's event log.
+        sizes = [len(m.content) for m in messages]
         kernel.events.append(
             kind=EventKind.LLM_REQUEST_SENT,
             actor="planner",
             task_id=task.task_id,
-            payload={"messages_count": len(messages)},
+            payload={
+                "messages_count": len(messages),
+                "session_chars": sizes[0] if len(sizes) >= 1 else 0,
+                "task_chars": sizes[1] if len(sizes) >= 2 else 0,
+                "turn_chars": sizes[2] if len(sizes) >= 3 else 0,
+                "total_chars": sum(sizes),
+                "new_events_count": len(new_events),
+                "events_index_before": since,
+                "events_index_after": len(events),
+            },
         )
+        # Advance the per-task cursor so the next call sends only what comes
+        # after this turn's LLM_REQUEST_SENT (which is itself appended above).
+        self._last_event_index_sent[task.task_id] = len(events) + 1
         try:
             raw = self._llm.complete_json(
                 messages=messages,
