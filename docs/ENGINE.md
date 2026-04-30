@@ -108,7 +108,7 @@ IGLA_LMSTUDIO_KEY       (или --lm-key, default: 'lm-studio')
 
 ## Тесты
 
-`tests/` — 64 кейса:
+`tests/` — 65 кейсов:
 
 | Файл | Покрывает |
 |------|-----------|
@@ -118,6 +118,7 @@ IGLA_LMSTUDIO_KEY       (или --lm-key, default: 'lm-studio')
 | `test_registry.py`       | register/get/resolve, дубли |
 | `test_todo_tree.py`      | ветвление, агрегация статуса, snapshot round-trip |
 | `test_policy_engine.py`  | unknown_tool, schema, allowed/forbidden, no_blind_retry |
+| `test_prompts.py`        | prompt hot path: no repeated system message |
 | `test_motivation.py`     | bootstrap, failure diagnosis, clarification, task done |
 | `test_planner_loop.py`   | end-to-end через OfflineCannedClient: declare/branch/clarify/diagnose |
 

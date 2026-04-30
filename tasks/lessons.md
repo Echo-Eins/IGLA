@@ -7,3 +7,10 @@ workspace discovery tools (`find_files`, `search_text`, later list/index tools)
 before asking the user for a path. User clarification is reserved for zero
 matches, ambiguous equivalent matches, policy/TODO conflicts, or hard runtime
 failure.
+
+## 2026-04-30: Linux-first target
+
+IGLA is developed for Linux first. Architecture, sandboxing, process
+supervision, path policy, and runtime behavior should optimize for Linux as
+the primary target. Windows compatibility is secondary and should not drive
+core design unless the user explicitly asks for it.

@@ -15,3 +15,19 @@
 - Updated failure-diagnosis policy to allow explicitly listed read-only diagnostic tools.
 - Fixed Windows executor timeout fallback: no `SIGALRM` means no-op timeout until sandbox/process supervisor exists.
 - Verified with `pytest tests/`: 64 passed.
+
+# Bugfix: reduce repeated LM Studio prompt payload
+
+- [x] Confirm repeated system prompt path in planner loop.
+- [x] Remove per-iteration system message from LM Studio requests.
+- [x] Keep large planner bootstrap prompt in code for a future stateful/session backend.
+- [x] Compact JSON-only context payload sent to LM Studio during runtime steps.
+- [x] Add prompt regression test.
+- [x] Verify tests.
+
+## Review
+
+- Runtime planner requests no longer include `role=system`.
+- `PLANNER_BOOTSTRAP_PROMPT` exists for a future stateful/session backend; current LM Studio Chat Completions is stateless, so a fake init request is not sent.
+- Per-step model input is now a single compact JSON block.
+- Verified with `pytest tests/`: 65 passed.

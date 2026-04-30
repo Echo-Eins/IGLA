@@ -1,15 +1,8 @@
 """Prompt construction for the planner.
 
-We send the model a *narrow* contract:
-
-1. A short system prompt describing IGLA's role rules (verbatim, never
-   rendered from runtime state — it is the model's "constitution").
-2. A user message containing a JSON pack of context: task, runtime state,
-   TODO tree, last rejection, allowed/forbidden actions.
-3. The structured-output schema for ``PlannerProposal``.
-
-The system prompt deliberately repeats the kernel's enforcement rules.
-The model "knowing" them is a nicety: the kernel still enforces them.
+The repeated LM Studio payload must stay small. Kernel policy, response schema,
+and Pydantic validation enforce the contract; no per-iteration system message
+is sent in the MVP hot path.
 """
 from __future__ import annotations
 
@@ -25,39 +18,33 @@ from ..protocol.todo import TodoTreeSnapshot
 from ..todo.render import render_dict_for_prompt, render_text
 from .llm_client import LLMChatMessage
 
-SYSTEM_PROMPT = """\
-Ты — Planner системы IGLA. ИГЛА не отвечает на вопросы и не пишет тексты,
-она выполняет действия. Твоя задача — на каждом шаге вернуть **строго
-один** JSON-объект — ``PlannerProposal``.
+PLANNER_BOOTSTRAP_PROMPT = """\
+Ты — Planner системы IGLA.
 
-Жёсткие правила (всё, что им не соответствует, runtime отклонит):
+ИГЛА — локальный проверяющий runtime, где модель не исполняет действия
+напрямую. Модель только предлагает структурированный следующий шаг, а Runtime
+через Kernel, PolicyEngine, StateMachine, ToolRegistry и Executor решает,
+можно ли этот шаг выполнить.
 
-1. Поле ``action`` — одно из: ``tool_invocation``, ``ask_user_clarification``,
-   ``todo_branch``, ``todo_complete``, ``declare_task_done``.
-2. Если runtime прислал ``allowed_next_actions``, выбирай только из этого
-   списка. Если runtime прислал ``forbidden_next_actions`` — никогда не
-   используй такие.
-3. Никогда не возвращай свободный текст, рассуждения или дополнительный
-   JSON вне корневого объекта.
-4. ``reason`` — короткое (1–2 предложения) обоснование, **зачем** это
-   действие именно сейчас. Без него — отказ.
-5. ``target_todo_node_id`` указывай, если действие относится к конкретному
-   узлу TODO (используй ``id`` из дерева).
-6. После провала шага runtime включает FAILURE_DIAGNOSIS_REQUIRED. В этом
-   режиме запрещены ``tool_invocation`` и ``declare_task_done``. Сначала
-   разберись (clarification / todo_branch / todo_complete).
-7. Не повторяй уже отвергнутый proposal. ``last_rejection`` всегда виден.
-8. Не выдумывай tool_name: используй только тех, что в ``available_tools``.
-9. ``declare_task_done`` допустим только когда все open-узлы TODO закрыты
-   или явно abandoned, и цель достигнута.
-10. Не спрашивай пользователя, где находится файл/строка/символ, пока не
-    использованы доступные локальные discovery tools. Для запроса вида
-    «открой/прочитай файл X» сначала используй ``find_files`` с именем X,
-    затем ``read_file`` по найденному пути. ``ask_user_clarification`` для
-    пути допустим только если поиск дал 0 результатов, несколько одинаково
-    подходящих кандидатов, конфликт с TODO/policy или капитальную поломку.
+Главные правила:
 
-Никогда не пиши приветствий, объяснений, кода. Только один JSON-объект.
+1. Возвращай только один JSON-объект PlannerProposal.
+2. Не пиши свободный текст, рассуждения, приветствия или Markdown вне JSON.
+3. Выбирай только действия из allowed_next_actions.
+4. Никогда не выбирай действия из forbidden_next_actions.
+5. Используй только tools из available_tools.
+6. Не выдумывай состояние файлов, команд, логов, системы или памяти.
+7. Для файлов, путей, строк и символов сначала используй локальные tools:
+   find_files, search_text, read_file.
+8. ask_user_clarification допустим только при неоднозначности, конфликте
+   TODO/policy, отсутствии результатов локального поиска или hard failure.
+9. После failure нельзя повторять тот же класс действий вслепую. Сначала
+   диагностика, новый evidence или изменённое условие.
+10. declare_task_done допустим только когда цель достигнута и открытые TODO
+    закрыты или явно abandoned.
+
+Runtime всё равно проверит JSON, schema, allowed actions, tools и policy.
+Если ты ошибёшься, Kernel отклонит proposal и вернёт last_rejection.
 """
 
 
@@ -72,6 +59,17 @@ def build_proposal_messages(
     chat_tail: list[dict[str, str]] | None = None,
 ) -> list[LLMChatMessage]:
     pack: dict[str, Any] = {
+        "request": {
+            "kind": "planner_step",
+            "output": "PlannerProposal",
+            "rules": [
+                "choose_only_allowed_next_actions",
+                "never_choose_forbidden_next_actions",
+                "use_available_tools_only",
+                "local_discovery_before_user_clarification",
+                "return_json_only",
+            ],
+        },
         "task": {
             "task_id": task.task_id,
             "raw_request": task.raw_request,
@@ -93,30 +91,26 @@ def build_proposal_messages(
         "todo_tree_summary": render_text(todo, with_ids=True),
         "todo_tree": render_dict_for_prompt(todo),
         "available_tools": available_tools,
-        "last_rejection": (
-            None
-            if last_decision is None or last_decision.is_allow
-            else {
-                "reason_code": last_decision.rejection.reason_code if last_decision.rejection else None,
-                "message": last_decision.rejection.message if last_decision.rejection else None,
-                "rule_id": last_decision.rejection.rule_id if last_decision.rejection else None,
-                "allowed_next_actions": list(last_decision.allowed_next_actions),
-                "forbidden_next_actions": list(last_decision.forbidden_next_actions),
-            }
-        ),
+        "last_rejection": None,
         "recent_events": list(last_event_log_tail or []),
         "chat_tail": list(chat_tail or []),
     }
+    rejection = None if last_decision is None or last_decision.is_allow else last_decision.rejection
+    if rejection is not None:
+        pack["last_rejection"] = {
+            "reason_code": rejection.reason_code,
+            "message": rejection.message,
+            "rule_id": rejection.rule_id,
+            "allowed_next_actions": list(last_decision.allowed_next_actions),
+            "forbidden_next_actions": list(last_decision.forbidden_next_actions),
+        }
 
-    user = (
-        "Контекст задачи и состояния runtime ниже. Верни ровно один "
-        "JSON-объект формата PlannerProposal.\n\n"
-        f"{json.dumps(pack, ensure_ascii=False, indent=2)}"
+    user = json.dumps(
+        pack,
+        ensure_ascii=False,
+        separators=(",", ":"),
     )
-    return [
-        LLMChatMessage(role="system", content=SYSTEM_PROMPT),
-        LLMChatMessage(role="user", content=user),
-    ]
+    return [LLMChatMessage(role="user", content=user)]
 
 
 def build_proposal_schema() -> dict[str, Any]:
