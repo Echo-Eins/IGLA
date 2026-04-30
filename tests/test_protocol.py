@@ -109,6 +109,73 @@ def test_proposal_rejects_missing_reason() -> None:
         )
 
 
+@pytest.mark.parametrize(
+    "tool_name",
+    ["... ... ...", "?? ??", "  ", "tool name with space", "🚀tool"],
+)
+def test_proposal_rejects_degenerate_tool_name(tool_name: str) -> None:
+    """Schema must block placeholder-style tool_name garbage."""
+    with pytest.raises(ValidationError):
+        PlannerProposal.model_validate(
+            {
+                "action": "tool_invocation",
+                "tool_name": tool_name,
+                "tool_version": "1.0.0",
+                "input": {},
+                "reason": "x",
+            }
+        )
+
+
+@pytest.mark.parametrize(
+    "tool_version",
+    ["v1.??? ?", "...", "   ", "next version please"],
+)
+def test_proposal_rejects_degenerate_tool_version(tool_version: str) -> None:
+    """Schema must block placeholder-style tool_version garbage."""
+    with pytest.raises(ValidationError):
+        PlannerProposal.model_validate(
+            {
+                "action": "tool_invocation",
+                "tool_name": "find_files",
+                "tool_version": tool_version,
+                "input": {},
+                "reason": "x",
+            }
+        )
+
+
+@pytest.mark.parametrize(
+    "node_id",
+    ["AB5SP1???????", "  AB5SP1", "node id with spaces", "🚫"],
+)
+def test_proposal_rejects_degenerate_node_id(node_id: str) -> None:
+    """Schema must block degenerate parent_node_id / node_id garbage."""
+    with pytest.raises(ValidationError):
+        PlannerProposal.model_validate(
+            {
+                "action": "todo_branch",
+                "parent_node_id": node_id,
+                "reason": "x",
+                "children": [{"title": "step", "kind": "subgoal"}],
+            }
+        )
+
+
+def test_proposal_accepts_canonical_versions() -> None:
+    for version in ("1.0.0", "v1.0.0", "1.2.3-rc.1", "2.0.0+build.1"):
+        proposal = PlannerProposal.model_validate(
+            {
+                "action": "tool_invocation",
+                "tool_name": "find_files",
+                "tool_version": version,
+                "input": {},
+                "reason": "x",
+            }
+        )
+        assert proposal.root.tool_version == version
+
+
 def test_action_request_serialises() -> None:
     action = ActionRequest(
         kind="tool_invocation",

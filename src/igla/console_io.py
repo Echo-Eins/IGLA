@@ -12,6 +12,13 @@ We never want IGLA to crash on user input. This module provides:
 * ``safe_readline`` — read one line from a TTY, surviving any encoding error
   by falling back to a raw byte read + permissive decode. Returns ``""`` on
   EOF.
+
+Importing ``readline`` (when available) installs GNU readline as the line
+editor for ``input()``: that is what gives the user backspace, arrow keys,
+and history. Without this import, terminals that do not pre-process line
+edits send raw control bytes through to Python and the user sees garbled
+input. We import it eagerly, but tolerate platforms (Windows without
+pyreadline) that don't ship the module.
 """
 from __future__ import annotations
 
@@ -19,6 +26,10 @@ import io
 import re
 import sys
 from contextlib import suppress
+
+with suppress(ImportError):
+    import readline  # noqa: F401  — side effect: enables line editing in input()
+
 
 _ANSI_CSI_RE = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
 
