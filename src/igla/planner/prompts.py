@@ -81,19 +81,22 @@ SESSION_HARD_RULES: tuple[str, ...] = (
     "Выбирай только действия из allowed_next_actions текущего хода. "
     "Никогда не выбирай из forbidden_next_actions.",
     "Используй только tool из available_tools (см. секцию TOOLS ниже). "
-    "Имя и версия tool должны совпадать дословно.",
+    "tool_name и tool_version должны совпадать с available_tools дословно — "
+    "не придумывай имена и не изменяй версию.",
     "Не выдумывай состояние файлов, путей, команд, строк, логов или "
     "результатов tool. Если не знаешь — узнавай через tool, не через догадку.",
     "Прежде чем спрашивать пользователя про файлы или пути, обязательно "
     "попробуй find_files и search_text. ask_user_clarification — последнее "
     "средство, не первое.",
+    "Как только результат tool даёт достаточно данных чтобы ответить на цель "
+    "задачи — СРАЗУ вызывай declare_task_done с ответом в поле summary. "
+    "Не вызывай больше tools если ответ уже есть в событиях.",
     "После ошибки tool ты в режиме FAILURE_DIAGNOSIS_REQUIRED. Запрещено "
     "вслепую повторять тот же класс действий. Сначала диагностика "
     "(find_files / search_text / read_file), потом другая попытка.",
-    "declare_task_done разрешён только когда цель действительно достигнута "
-    "и все открытые TODO-узлы закрыты или явно отменены.",
     "Если предыдущий ход был отклонён (last_rejection), внимательно прочитай "
-    "reason_code и message и измени предложение, а не повторяй то же самое.",
+    "reason_code, message и hints — они содержат точный список доступных "
+    "инструментов. Не повторяй тот же tool_name или tool_version.",
 )
 
 SESSION_OUTPUT_GRAMMAR = """\
@@ -350,13 +353,16 @@ def build_turn_user_message(
         else last_decision.rejection
     )
     if rejection is not None and last_decision is not None:
-        pack["last_rejection"] = {
+        rej_block: dict[str, Any] = {
             "reason_code": rejection.reason_code,
             "message": rejection.message,
             "rule_id": rejection.rule_id,
             "allowed_next_actions": list(last_decision.allowed_next_actions),
             "forbidden_next_actions": list(last_decision.forbidden_next_actions),
         }
+        if rejection.hints:
+            rej_block["hints"] = list(rejection.hints)
+        pack["last_rejection"] = rej_block
     if extras:
         # Reserved for future expansion (e.g. memory snippets). Caller owns
         # the keys; we put them under a namespaced bucket so they never

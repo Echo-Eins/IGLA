@@ -49,3 +49,22 @@ def test_missing_tool_raises() -> None:
         reg.get("nope")
     with pytest.raises(ToolNotFoundError):
         reg.resolve("missing.cap", {})
+
+
+def test_wrong_version_falls_back_to_registered() -> None:
+    """Model-hallucinated versions (e.g. '1.We...') resolve to actual version."""
+    reg = ToolRegistry()
+    tool = NoopObserveTool()
+    reg.register(tool)
+
+    # Exact wrong version should still find the tool (name-based fallback).
+    assert reg.has("noop_observe", "1.We...")
+    assert reg.has("noop_observe", "9.9.9")
+    manifest = reg.get("noop_observe", "garbage-version")
+    assert manifest.version == "1.0.0"
+    assert reg.get_tool("noop_observe", "wrong") is tool
+
+    # Truly unknown tool name still fails.
+    assert not reg.has("no_such_tool", "1.0.0")
+    with pytest.raises(ToolNotFoundError):
+        reg.get("no_such_tool", "1.0.0")

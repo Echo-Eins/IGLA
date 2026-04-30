@@ -92,11 +92,16 @@ class ToolRegistry:
 
     def _lookup_manifest(self, name: str, version: str | None) -> ToolManifest | None:
         version = _normalize_version_ref(version)
-        if version is not None:
-            return self._manifests.get((name, version))
-        # Find the highest version registered under that name.
         matches = [m for k, m in self._manifests.items() if k[0] == name]
         if not matches:
             return None
+        if version is not None:
+            exact = self._manifests.get((name, version))
+            if exact is not None:
+                return exact
+            # Model sent a valid-format but wrong version string — fall back to
+            # the highest registered version rather than hard-failing. The policy
+            # engine already enforces that the *name* is known; the version is
+            # advisory (the model frequently hallucinates it).
         matches.sort(key=lambda m: _parse_version(m.version), reverse=True)
         return matches[0]
