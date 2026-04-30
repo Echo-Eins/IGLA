@@ -10,6 +10,7 @@ from igla.policies.engine import PolicyContext, PolicyEngine
 from igla.protocol.policy import ActionRequest, PolicyDecisionKind
 from igla.protocol.runtime import RuntimeMode
 from igla.tools.builtin.noop_observe import NoopObserveTool
+from igla.tools.builtin.search import FindFilesTool
 
 
 def _build(make_settings):
@@ -91,6 +92,25 @@ def test_no_blind_retry_blocks_tool_invocation_in_diagnosis(make_settings) -> No
     decision = engine.check(action, kernel=kernel)
     assert decision.is_deny
     assert decision.rejection.reason_code == "NO_BLIND_RETRY"
+
+
+def test_no_blind_retry_allows_explicit_read_only_diagnostic_tool(make_settings) -> None:
+    engine, kernel = _build(make_settings)
+    kernel.registry.register(FindFilesTool(workspace_root=str(kernel.workspace)))
+    kernel.state.ensure_task("t1")
+    kernel.state.transition_mode("t1", RuntimeMode.FAILURE_DIAGNOSIS_REQUIRED)
+    kernel.state.set_allowed_actions("t1", ["tool:find_files"])
+    action = ActionRequest(
+        kind="tool_invocation",
+        actor="planner",
+        task_id="t1",
+        tool_name="find_files",
+        tool_version="1.0.0",
+        input={"query": "00-review.md"},
+        reason="locate missing file",
+    )
+    decision = engine.check(action, kernel=kernel)
+    assert decision.decision is PolicyDecisionKind.ALLOW
 
 
 def test_allow_when_clarification_in_diagnosis(make_settings) -> None:

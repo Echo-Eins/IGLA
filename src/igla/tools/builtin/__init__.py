@@ -7,6 +7,8 @@ The set is intentionally tiny:
   a read receipt (consumed later by ``read_before_write``).
 * ``noop_observe`` — declarative no-op used by the planner to log a
   decision/observation without touching the world.
+* ``find_files`` / ``search_text`` — workspace-bounded discovery before
+  asking the user for paths or source locations.
 
 The complex multi-step affordances (``ask_user_clarification``,
 ``todo_branch``, ``todo_complete``, ``declare_task_done``) are NOT tools —
@@ -15,16 +17,19 @@ recorded as events. This keeps the protocol cleanly separated:
 ``ToolInvocation`` is for "did something to the world", and the action
 proposals are for "navigated the TODO/plan".
 """
-from .ask_user import AskUserTool, AskUserChannel, ConsoleAskUserChannel
+from .ask_user import AskUserChannel, AskUserTool, ConsoleAskUserChannel
 from .noop_observe import NoopObserveTool
 from .read_file import ReadFileTool
+from .search import FindFilesTool, SearchTextTool
 
 __all__ = [
     "AskUserChannel",
     "AskUserTool",
     "ConsoleAskUserChannel",
+    "FindFilesTool",
     "NoopObserveTool",
     "ReadFileTool",
+    "SearchTextTool",
 ]
 
 
@@ -37,6 +42,8 @@ def build_default_toolset(
     """Construct the default in-process tool instances."""
     return [
         AskUserTool(channel=ask_user_channel),
+        FindFilesTool(workspace_root=workspace_root),
         ReadFileTool(workspace_root=workspace_root, receipts=receipts),
+        SearchTextTool(workspace_root=workspace_root),
         NoopObserveTool(),
     ]

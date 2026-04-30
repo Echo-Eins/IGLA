@@ -110,11 +110,12 @@ def _registry_known_tool(ctx: PredicateContext) -> PredicateOutcome:
             rule_id="registry_known_tool",
         )
     if not ctx.kernel.registry.has(name, ctx.action.tool_version):
+        available = ", ".join(m.name for m in ctx.kernel.registry.list_tools())
         return PredicateOutcome.deny(
             reason_code="UNKNOWN_TOOL",
             message=f"tool not found in registry: {name}@{ctx.action.tool_version or '*'}",
             rule_id="registry_known_tool",
-            hints=[f"available tools: {', '.join(m.name for m in ctx.kernel.registry.list_tools())}"],
+            hints=[f"available tools: {available}"],
         )
     return PredicateOutcome.allow()
 
@@ -241,17 +242,31 @@ def _no_blind_retry(ctx: PredicateContext) -> PredicateOutcome:
     }
     if ctx.action.kind in diagnostic:
         return PredicateOutcome.allow()
+    if _is_allowed_read_only_tool(ctx):
+        return PredicateOutcome.allow()
     if state.failure_classified and state.changed_condition_declared:
         return PredicateOutcome.allow()
     return PredicateOutcome.deny(
         reason_code="NO_BLIND_RETRY",
         message=(
             "Previous step failed. Diagnose first: ask_user_clarification, "
-            "todo_branch, or todo_complete to update the plan."
+            "todo_branch, todo_complete, or an allowed read-only diagnostic tool."
         ),
         rule_id="no_blind_retry",
-        allowed_next=tuple(sorted(diagnostic)),
+        allowed_next=tuple(sorted({*diagnostic, *state.allowed_next_actions})),
     )
+
+
+def _is_allowed_read_only_tool(ctx: PredicateContext) -> bool:
+    if ctx.action.kind != "tool_invocation" or not ctx.action.tool_name:
+        return False
+    if f"tool:{ctx.action.tool_name}" not in ctx.task_state.allowed_next_actions:
+        return False
+    try:
+        manifest = ctx.kernel.registry.get(ctx.action.tool_name, ctx.action.tool_version)
+    except Exception:
+        return False
+    return manifest.risk_level == "read_only" and not manifest.side_effects
 
 
 def _clarification_depth(ctx: PredicateContext) -> PredicateOutcome:

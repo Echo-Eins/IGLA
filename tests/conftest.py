@@ -16,9 +16,13 @@ from igla.planner.planner import Planner
 from igla.policies.constitution import load_constitution
 from igla.policies.engine import PolicyContext, PolicyEngine
 from igla.todo.store import TodoStore
-from igla.todo.tree import TodoTree
-from igla.tools.builtin import AskUserChannel, AskUserTool, NoopObserveTool, ReadFileTool
-
+from igla.tools.builtin import (
+    AskUserTool,
+    FindFilesTool,
+    NoopObserveTool,
+    ReadFileTool,
+    SearchTextTool,
+)
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 CONFIGS = REPO_ROOT / "configs"
@@ -82,10 +86,12 @@ def build_runtime(
     kernel.registry.register_many(
         [
             AskUserTool(channel=channel),
+            FindFilesTool(workspace_root=str(settings.paths.workspace)),
             ReadFileTool(
                 workspace_root=str(settings.paths.workspace),
                 receipts=kernel.receipts,
             ),
+            SearchTextTool(workspace_root=str(settings.paths.workspace)),
             NoopObserveTool(),
         ]
     )

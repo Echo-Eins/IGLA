@@ -108,15 +108,23 @@ def cmd_doctor(args: argparse.Namespace) -> int:
         def ask(self, *, question: str, prompt_label: str | None = None) -> str:
             return ""
 
-    from .tools.builtin import AskUserTool, NoopObserveTool, ReadFileTool
+    from .tools.builtin import (
+        AskUserTool,
+        FindFilesTool,
+        NoopObserveTool,
+        ReadFileTool,
+        SearchTextTool,
+    )
 
     kernel.registry.register_many(
         [
             AskUserTool(channel=_DummyAsk()),
+            FindFilesTool(workspace_root=str(settings.paths.workspace)),
             ReadFileTool(
                 workspace_root=str(settings.paths.workspace),
                 receipts=kernel.receipts,
             ),
+            SearchTextTool(workspace_root=str(settings.paths.workspace)),
             NoopObserveTool(),
         ]
     )

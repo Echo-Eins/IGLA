@@ -3,14 +3,14 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
+from conftest import build_runtime  # type: ignore[import-not-found]
+
 from igla.ids import prefixed_id
 from igla.kernel.clock import StepClock
 from igla.protocol.event import EventKind
 from igla.protocol.runtime import RuntimeMode
 from igla.protocol.task import TaskSpec, TaskStatus
 from igla.todo.tree import TodoTree
-
-from conftest import build_runtime  # type: ignore[import-not-found]
 
 
 def _new_task(text: str, kernel) -> TaskSpec:
@@ -152,8 +152,6 @@ def test_failed_tool_enters_diagnosis_and_persists_through_clarification(
     make_settings,
 ) -> None:
     """End-to-end: failure → diagnosis → clarify → resume preserves diagnosis."""
-    from igla.protocol.runtime import RuntimeMode
-
     settings = make_settings()
     canned = [
         {
@@ -163,7 +161,8 @@ def test_failed_tool_enters_diagnosis_and_persists_through_clarification(
             "input": {"path": "no_such_file.txt"},
             "reason": "look at the file",
         },
-        # In diagnosis mode tool_invocation is forbidden — ask user instead.
+        # In diagnosis mode broad tool_invocation is blocked, but the
+        # planner may still ask the user if discovery cannot proceed.
         {
             "action": "ask_user_clarification",
             "question": "the file is missing — what now?",
@@ -193,7 +192,8 @@ def test_failed_tool_enters_diagnosis_and_persists_through_clarification(
     state = kernel.state.get_state(task.task_id)
     assert state.mode is RuntimeMode.NEEDS_USER_CLARIFICATION
     assert state.pre_pause_mode is RuntimeMode.FAILURE_DIAGNOSIS_REQUIRED
-    assert "tool_invocation" in state.pre_pause_forbidden
+    assert "tool:find_files" in state.pre_pause_allowed
+    assert "tool:search_text" in state.pre_pause_allowed
     assert "declare_task_done" in state.pre_pause_forbidden
 
     # Simulate the resume effect explicitly (no further canned responses).
@@ -212,6 +212,53 @@ def test_failed_tool_enters_diagnosis_and_persists_through_clarification(
     assert state.mode is RuntimeMode.FAILURE_DIAGNOSIS_REQUIRED
     assert "declare_task_done" in state.forbidden_next_actions
     assert state.pre_pause_mode is None
+
+
+def test_open_file_flow_can_discover_then_read(make_settings) -> None:
+    settings = make_settings()
+    docs = settings.paths.workspace / "docs"
+    docs.mkdir(parents=True)
+    review = docs / "00-review.md"
+    review.write_text("# Review\n", encoding="utf-8")
+    canned = [
+        {
+            "action": "tool_invocation",
+            "tool_name": "find_files",
+            "tool_version": "1.0.0",
+            "input": {"query": "00-review.md", "max_results": 5},
+            "reason": "Find the file locally before asking the user for its path.",
+        },
+        {
+            "action": "tool_invocation",
+            "tool_name": "read_file",
+            "tool_version": "1.0.0",
+            "input": {"path": "docs/00-review.md"},
+            "reason": "Read the discovered file.",
+        },
+        {
+            "action": "declare_task_done",
+            "summary": "file opened",
+            "reason": "The requested file was found and read.",
+        },
+    ]
+    planner, kernel, _, _, _ = build_runtime(
+        settings,
+        canned_responses=canned,
+        clock=StepClock(datetime(2026, 4, 29, tzinfo=timezone.utc), step_seconds=0.1),
+    )
+    task = _new_task("Открой файл 00-review.md", kernel)
+    todo = TodoTree(task.task_id, kernel.clock)
+    todo.create_root(title="open")
+
+    outcome = planner.run_task(task, todo)
+
+    assert outcome.status is TaskStatus.DONE
+    completed = [
+        e
+        for e in kernel.events.list_by_task(task.task_id)
+        if e.kind is EventKind.TOOL_INVOCATION_COMPLETED
+    ]
+    assert [e.payload["tool_name"] for e in completed] == ["find_files", "read_file"]
 
 
 def test_policy_rejection_loops_until_max(make_settings) -> None:

@@ -42,7 +42,9 @@ def test_failure_event_enters_diagnosis(make_settings) -> None:
     state = kernel.state.get_state("t1")
     assert state.mode is RuntimeMode.FAILURE_DIAGNOSIS_REQUIRED
     assert "declare_task_done" not in state.allowed_next_actions
-    assert "tool_invocation" in state.forbidden_next_actions
+    assert "tool:find_files" in state.allowed_next_actions
+    assert "tool:search_text" in state.allowed_next_actions
+    assert "declare_task_done" in state.forbidden_next_actions
 
 
 def test_user_input_resumes_after_clarification(make_settings) -> None:

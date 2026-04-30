@@ -15,19 +15,17 @@ from __future__ import annotations
 import signal
 import time
 import traceback
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from ..protocol.invocation import ToolInvocation
-from ..protocol.manifest import ToolManifest
 from ..protocol.result import ToolError, ToolResult, ToolResultMetric
 from .errors import ToolValidationError
 from .schema_validator import SchemaValidator
 
 if TYPE_CHECKING:  # pragma: no cover
-    from ..tools.base import Tool
-
     from .registry import ToolRegistry
 
 
@@ -45,27 +43,33 @@ class _Timeout(Exception):
 
 
 @contextmanager
-def _alarm_timeout(seconds: int):
+def _alarm_timeout(seconds: int) -> Iterator[None]:
     """Coarse SIGALRM-based timeout. Linux only.
 
-    Tools running pure Python or subprocesses obey this; tightly C-bound
-    code may not. The proper sandbox runner will replace this.
+    Tools running pure Python or subprocesses obey this on POSIX; tightly
+    C-bound code may not. On platforms without SIGALRM (Windows) this is a
+    no-op until the proper sandbox runner replaces it.
     """
 
-    if seconds <= 0:
+    sigalarm = getattr(signal, "SIGALRM", None)
+    alarm = getattr(signal, "alarm", None)
+    if seconds <= 0 or sigalarm is None or not callable(alarm):
         yield
         return
 
-    def _handler(signum, frame):  # noqa: ANN001 (signal handler signature)
+    alarm_fn: Callable[[int], int] = alarm
+
+    def _handler(signum: int, frame: object) -> None:
+        del signum, frame
         raise _Timeout(f"tool timed out after {seconds}s")
 
-    previous = signal.signal(signal.SIGALRM, _handler)
-    signal.alarm(seconds)
+    previous = signal.signal(sigalarm, _handler)
+    alarm_fn(seconds)
     try:
         yield
     finally:
-        signal.alarm(0)
-        signal.signal(signal.SIGALRM, previous)
+        alarm_fn(0)
+        signal.signal(sigalarm, previous)
 
 
 class Executor:
@@ -95,7 +99,10 @@ class Executor:
             )
 
         tool = self._registry.get_tool(manifest.name, manifest.version)
-        timeout = max(1, int(invocation.policy.max_runtime_seconds or manifest.resources.timeout_seconds))
+        timeout = max(
+            1,
+            int(invocation.policy.max_runtime_seconds or manifest.resources.timeout_seconds),
+        )
 
         started = time.monotonic()
         try:
@@ -141,7 +148,7 @@ def _result_failure(
     kind: str,
     code: str,
     message: str,
-    details: dict | None = None,
+    details: dict[str, object] | None = None,
     runtime_ms: int | None = None,
 ) -> ToolResult:
     return ToolResult(

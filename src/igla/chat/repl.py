@@ -46,8 +46,10 @@ from ..todo.tree import TodoTree
 from ..tools.builtin import (
     AskUserChannel,
     AskUserTool,
+    FindFilesTool,
     NoopObserveTool,
     ReadFileTool,
+    SearchTextTool,
 )
 
 
@@ -135,12 +137,16 @@ class ChatREPL:
         # Build tools that need the chat I/O.
         ask_channel: AskUserChannel = _RichAskUserChannel(self._console, self._transcript)
         ask_tool = AskUserTool(channel=ask_channel)
+        find_tool = FindFilesTool(workspace_root=str(settings.paths.workspace))
         read_tool = ReadFileTool(
             workspace_root=str(settings.paths.workspace),
             receipts=self._kernel.receipts,
         )
+        search_tool = SearchTextTool(workspace_root=str(settings.paths.workspace))
         observe_tool = NoopObserveTool()
-        self._kernel.registry.register_many([ask_tool, read_tool, observe_tool])
+        self._kernel.registry.register_many(
+            [ask_tool, find_tool, read_tool, search_tool, observe_tool]
+        )
 
         constitution = load_constitution(settings.paths.constitution_file)
         policy = PolicyEngine(

@@ -90,13 +90,15 @@ rules:
       - kind: set_allowed_actions
         args:
           actions:
+            - tool:find_files
+            - tool:search_text
+            - tool:read_file
             - ask_user_clarification
             - todo_branch
             - todo_complete
       - kind: set_forbidden_actions
         args:
           actions:
-            - tool_invocation
             - declare_task_done
       - kind: clear_flags
         args:

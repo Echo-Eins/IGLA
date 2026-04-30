@@ -55,6 +55,7 @@ src/igla/
 │   ├── base.py           Tool ABC
 │   └── builtin/
 │       ├── ask_user.py
+│       ├── search.py     find_files + search_text workspace discovery
 │       ├── read_file.py
 │       └── noop_observe.py
 ├── chat/                 REPL
@@ -76,7 +77,7 @@ src/igla/
 
 * **LLM proposes. Runtime disposes.** Планировщик отдаёт только `PlannerProposal`; всё остальное — kernel.
 * **Schema-validated.** Каждый ToolInvocation/ToolResult валидируется через Pydantic + JSON Schema.
-* **No blind retry.** Предикат `no_blind_retry` блокирует мутирующие действия в `FAILURE_DIAGNOSIS_REQUIRED`.
+* **No blind retry.** Предикат `no_blind_retry` блокирует мутирующие действия в `FAILURE_DIAGNOSIS_REQUIRED`, но допускает явно разрешённые read-only diagnostic tools.
 * **Pause/resume через clarification.** `pause_for_clarification` / `resume_from_clarification` сохраняют пред-паузный режим (включая `FAILURE_DIAGNOSIS_REQUIRED`).
 * **Bounded loops.** Хард-лимит итераций и хард-лимит подряд идущих rejection'ов в Policy Engine.
 * **Append-only audit.** EventStore — JSONL, толерантный к torn lines.
@@ -107,11 +108,12 @@ IGLA_LMSTUDIO_KEY       (или --lm-key, default: 'lm-studio')
 
 ## Тесты
 
-`tests/` — 46 кейсов:
+`tests/` — 64 кейса:
 
 | Файл | Покрывает |
 |------|-----------|
 | `test_protocol.py`       | замороженность envelope'ов, дискриминатор PlannerProposal |
+| `test_discovery_tools.py` | workspace-bounded find_files/search_text |
 | `test_event_store.py`    | append, iter_all, filter, torn-line tolerance |
 | `test_registry.py`       | register/get/resolve, дубли |
 | `test_todo_tree.py`      | ветвление, агрегация статуса, snapshot round-trip |
