@@ -67,6 +67,7 @@ def _make_llm(settings: IglaSettings) -> LMStudioClient:
         top_p=settings.lm_studio.top_p,
         max_tokens=settings.lm_studio.max_tokens,
         use_json_schema_response=settings.lm_studio.use_json_schema_response,
+        repeat_penalty=settings.lm_studio.repeat_penalty,
     )
 
 

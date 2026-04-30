@@ -27,6 +27,9 @@ class LMStudioSettings(BaseModel):
     # When False the planner falls back to plain JSON parsing instead of
     # the OpenAI-style ``response_format=json_schema`` request.
     use_json_schema_response: bool = True
+    # llama.cpp repeat_penalty — helps prevent degenerate token loops after
+    # policy rejections. 1.0 = disabled. Typical useful range: 1.05–1.15.
+    repeat_penalty: float = 1.05
 
 
 class PathsSettings(BaseModel):

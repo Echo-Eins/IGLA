@@ -58,6 +58,7 @@ class LMStudioClient:
         top_p: float = 1.0,
         max_tokens: int = 2048,
         use_json_schema_response: bool = True,
+        repeat_penalty: float = 1.0,
     ) -> None:
         self._base_url = base_url.rstrip("/")
         self._api_key = api_key
@@ -66,6 +67,7 @@ class LMStudioClient:
         self._top_p = top_p
         self._max_tokens = max_tokens
         self._use_schema = use_json_schema_response
+        self._repeat_penalty = repeat_penalty
         self._client = httpx.Client(timeout=timeout_s)
 
     def close(self) -> None:
@@ -92,6 +94,11 @@ class LMStudioClient:
             "max_tokens": self._max_tokens,
             "stream": False,
         }
+        if self._repeat_penalty != 1.0:
+            # llama.cpp extension (not in the OpenAI spec). Accepted by LM Studio
+            # and most llama.cpp-based servers. Penalises recently-seen tokens to
+            # prevent degenerate repetition loops after policy rejections.
+            payload["repeat_penalty"] = self._repeat_penalty
         if json_schema is not None and self._use_schema:
             payload["response_format"] = {
                 "type": "json_schema",
