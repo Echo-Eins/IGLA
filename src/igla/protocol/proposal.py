@@ -29,15 +29,16 @@ from pydantic import BaseModel, ConfigDict, Field, RootModel
 # Identifier-like name: ASCII letter/underscore + word/dash, up to 64 chars.
 # Matches every built-in tool name (find_files, search_text, read_file,
 # ask_user, noop_observe) and any reasonable future tool naming convention.
-_TOOL_NAME_PATTERN = r"^[A-Za-z_][A-Za-z0-9_\-]{0,63}$"
+_TOOL_NAME_PATTERN = r"^[A-Za-z_][A-Za-z0-9_-]{0,63}$"
 
 # Permissive semver-like version: digits, dots, hyphens, plus signs, and an
 # optional leading ``v``. Matches ``1.0.0``, ``1.2.3-rc.1``, ``v1.0.0``, etc.
-_TOOL_VERSION_PATTERN = r"^v?[0-9][0-9A-Za-z._+\-]{0,31}$"
+# Hyphen is placed first in the character class to avoid GBNF \- escape issue.
+_TOOL_VERSION_PATTERN = r"^v?[0-9][-0-9A-Za-z._+]{0,31}$"
 
 # TODO node ids are produced by ``ids.prefixed_id`` (e.g. ``8JGKWK`` /
 # ``node_01KQF...``). Allow ASCII alnum + underscore + dash, no spaces.
-_NODE_ID_PATTERN = r"^[A-Za-z0-9_\-]{1,64}$"
+_NODE_ID_PATTERN = r"^[A-Za-z0-9_-]{1,64}$"
 
 
 class ProposalKind:
