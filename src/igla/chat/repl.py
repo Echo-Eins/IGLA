@@ -213,7 +213,19 @@ class ChatREPL:
                 border_style="blue",
             )
         )
-        outcome = self._planner.run_task(task, todo)
+        try:
+            outcome = self._planner.run_task(task, todo)
+        except Exception as exc:  # noqa: BLE001 — protect the chat session
+            import traceback as _tb
+
+            self._console.print(
+                Panel(
+                    f"{exc}\n\n[dim]{_tb.format_exc()}[/dim]",
+                    title="planner crashed",
+                    border_style="red",
+                )
+            )
+            return
         self._handle_outcome(task, todo, outcome)
 
     def _handle_outcome(

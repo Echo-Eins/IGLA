@@ -140,7 +140,38 @@ class Planner:
                 return self._abort(task, "MAX_ITERATIONS_EXCEEDED")
 
             kernel.state.increment_iteration(task.task_id)
-            proposal = self._ask_planner(task=task, todo=todo, last_decision=last_decision)
+            try:
+                proposal = self._ask_planner(
+                    task=task, todo=todo, last_decision=last_decision
+                )
+            except _MalformedProposal as parse_exc:
+                # Convert to a rejection so the next iteration tells the
+                # model exactly what was wrong, and bump the rejection
+                # counter so an endlessly-broken model still aborts.
+                synthetic = self._malformed_to_decision(parse_exc, task)
+                last_decision = synthetic
+                rejections = kernel.state.record_rejection(
+                    task.task_id,
+                    reason_code=synthetic.rejection.reason_code,
+                    message=synthetic.rejection.message,
+                )
+                kernel.events.append(
+                    kind=EventKind.POLICY_REJECTION,
+                    actor="planner",
+                    task_id=task.task_id,
+                    payload={
+                        "reason_code": "MALFORMED_PROPOSAL",
+                        "message": str(parse_exc)[:200],
+                        "raw": parse_exc.raw,
+                    },
+                )
+                if rejections >= self._settings.planner.max_consecutive_rejections:
+                    return self._abort(task, "MAX_CONSECUTIVE_REJECTIONS")
+                continue
+            except PlannerError:
+                # LLM client/transport error — abort cleanly.
+                return self._abort(task, "LLM_ERROR")
+
             decision = self._evaluate_proposal(proposal, todo=todo, task=task)
             last_decision = decision
 
@@ -257,12 +288,55 @@ class Planner:
             task_id=task.task_id,
             payload={"raw": raw},
         )
+        coerced, coercion_note = _coerce_proposal_shape(raw)
         try:
-            return PlannerProposal.model_validate(raw)
+            return PlannerProposal.model_validate(coerced)
         except Exception as exc:  # noqa: BLE001
-            # We treat a malformed model output as a rejection so the loop
-            # can retry without crashing the chat session.
-            raise _MalformedProposal(str(exc), raw=raw) from exc
+            # We treat a malformed model output as a structured rejection so
+            # the loop can retry. The exception is caught in ``run_task``
+            # and turned into a rejection event + feedback for the model.
+            raise _MalformedProposal(
+                str(exc),
+                raw=coerced,
+                coercion_note=coercion_note,
+            ) from exc
+
+    @staticmethod
+    def _malformed_to_decision(
+        exc: "_MalformedProposal",
+        task: TaskSpec,
+    ) -> PolicyDecision:
+        """Synthesise a PolicyDecision so the next prompt sees the parse error."""
+        from ..protocol.policy import PolicyRejection
+
+        action = ActionRequest(
+            kind="tool_invocation",
+            actor="planner",
+            task_id=task.task_id,
+            reason="(malformed proposal — see rejection)",
+            input={},
+        )
+        message = (
+            "Your last proposal could not be parsed. "
+            "Every response must be a single JSON object with a non-empty "
+            "``action`` field equal to one of: tool_invocation, "
+            "ask_user_clarification, todo_branch, todo_complete, "
+            "declare_task_done. "
+            f"Validation error: {exc}"
+        )
+        if exc.coercion_note:
+            message += f" Hint: {exc.coercion_note}"
+        return PolicyDecision(
+            decision=PolicyDecisionKind.DENY,
+            action=action,
+            rejection=PolicyRejection(
+                reason_code="MALFORMED_PROPOSAL",
+                message=message,
+                rule_id="planner.parse",
+            ),
+            allowed_next_actions=[],
+            forbidden_next_actions=[],
+        )
 
     def _evaluate_proposal(
         self,
@@ -599,9 +673,49 @@ _TASK_DONE = object()
 
 
 class _MalformedProposal(PlannerError):
-    def __init__(self, message: str, *, raw: dict[str, Any]) -> None:
+    def __init__(
+        self,
+        message: str,
+        *,
+        raw: dict[str, Any],
+        coercion_note: str | None = None,
+    ) -> None:
         super().__init__(message)
         self.raw = raw
+        self.coercion_note = coercion_note
 
     def __str__(self) -> str:  # pragma: no cover
-        return f"{super().__str__()}: {json.dumps(self.raw)[:300]}"
+        return f"{super().__str__()}: {json.dumps(self.raw, ensure_ascii=False)[:300]}"
+
+
+def _coerce_proposal_shape(raw: dict[str, Any]) -> tuple[dict[str, Any], str | None]:
+    """Best-effort recovery of a missing ``action`` discriminator.
+
+    Some local models (especially without strict ``response_format``)
+    routinely omit the discriminator while emitting an otherwise well-shaped
+    proposal. We patch the obvious shapes so parsing succeeds; if the patch
+    is wrong, the policy engine still rejects later. Returns the (possibly
+    patched) dict plus a short human-readable note about what we did.
+    """
+    if not isinstance(raw, dict):
+        return raw, None
+    if "action" in raw and raw["action"]:
+        return raw, None
+    patched = dict(raw)
+    note: str | None = None
+    if "tool_name" in raw and "tool_version" in raw:
+        patched["action"] = "tool_invocation"
+        note = "inferred action='tool_invocation' from presence of tool_name/tool_version"
+    elif "question" in raw:
+        patched["action"] = "ask_user_clarification"
+        note = "inferred action='ask_user_clarification' from presence of 'question'"
+    elif "parent_node_id" in raw and "children" in raw:
+        patched["action"] = "todo_branch"
+        note = "inferred action='todo_branch' from presence of parent_node_id/children"
+    elif "node_id" in raw and "summary" in raw:
+        patched["action"] = "todo_complete"
+        note = "inferred action='todo_complete' from presence of node_id/summary"
+    elif "summary" in raw and len(raw) <= 4:
+        patched["action"] = "declare_task_done"
+        note = "inferred action='declare_task_done' from minimal summary-only payload"
+    return patched, note
