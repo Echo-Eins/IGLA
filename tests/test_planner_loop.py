@@ -86,8 +86,23 @@ def test_branch_then_complete_then_done(make_settings) -> None:
 
 
 def test_ask_user_clarification_pauses_loop(make_settings) -> None:
+    """Clarification is allowed AFTER autonomous discovery has been tried.
+
+    ``discovery_before_clarification`` rejects ask_user_clarification on
+    turn 1. The model must first invoke a read-only tool; once any such
+    tool has run, asking the user is permitted.
+    """
     settings = make_settings()
     canned = [
+        # Autonomous discovery first — this satisfies discovery_before_clarification.
+        {
+            "action": "tool_invocation",
+            "tool_name": "find_files",
+            "tool_version": "1.0.0",
+            "input": {"query": "backup-target"},
+            "reason": "look for the backup target",
+        },
+        # Now clarification is unlocked.
         {
             "action": "ask_user_clarification",
             "question": "where to put it?",

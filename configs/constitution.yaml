@@ -31,6 +31,9 @@ predicates:
   - id: clarification_depth
     enabled: true
     rule_id: clarification_depth
+  - id: discovery_before_clarification
+    enabled: true
+    rule_id: discovery_before_clarification
   - id: allowed_actions_respected
     enabled: true
     rule_id: allowed_actions_respected

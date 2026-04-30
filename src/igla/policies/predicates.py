@@ -19,6 +19,7 @@ from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from ..protocol.event import EventKind
 from ..protocol.policy import ActionRequest, PolicyDecisionKind, PolicyRejection
 from ..protocol.runtime import RuntimeMode
 
@@ -289,6 +290,88 @@ def _clarification_depth(ctx: PredicateContext) -> PredicateOutcome:
     )
 
 
+def _discovery_before_clarification(ctx: PredicateContext) -> PredicateOutcome:
+    """IGLA must act, not ask.
+
+    Reject ``ask_user_clarification`` proposals unless one of these is true:
+
+    * the runtime is already in ``NEEDS_USER_CLARIFICATION`` (we are in an
+      active back-and-forth — continuation is fine);
+    * the runtime is in ``FAILURE_DIAGNOSIS_REQUIRED`` (recoverable failure
+      where asking the user is a legitimate fallback);
+    * at least one *read-only* discovery tool has already been invoked for
+      this task (find_files / search_text / read_file / any tool whose
+      manifest declares ``risk_level=read_only`` and ``side_effects=False``).
+
+    The model is told via the rejection message exactly what to do next, so
+    the next turn's prompt carries concrete, actionable hints rather than a
+    naked ``ACTION_NOT_IN_ALLOWED_LIST``.
+    """
+    if ctx.action.kind != "ask_user_clarification":
+        return PredicateOutcome.allow()
+
+    state = ctx.task_state
+    if state.mode in (
+        RuntimeMode.NEEDS_USER_CLARIFICATION,
+        RuntimeMode.FAILURE_DIAGNOSIS_REQUIRED,
+    ):
+        return PredicateOutcome.allow()
+
+    if _has_completed_readonly_tool(ctx):
+        return PredicateOutcome.allow()
+
+    discovery_hints = _discovery_tool_hints(ctx)
+    return PredicateOutcome.deny(
+        reason_code="MUST_DISCOVER_FIRST",
+        message=(
+            "IGLA не задаёт пользователю вопросов, пока сама не попробовала "
+            "найти ответ. Сначала вызови один из read-only discovery tools "
+            "(например find_files, search_text, read_file). "
+            "ask_user_clarification разрешён только после неудачной попытки "
+            "поиска или в режиме FAILURE_DIAGNOSIS_REQUIRED."
+        ),
+        rule_id="discovery_before_clarification",
+        hints=discovery_hints,
+        allowed_next=("tool_invocation", "todo_branch", "todo_complete"),
+    )
+
+
+def _has_completed_readonly_tool(ctx: PredicateContext) -> bool:
+    """True if any read-only tool invocation finished for this task."""
+    registry = ctx.kernel.registry
+    for evt in ctx.kernel.events.list_by_task(ctx.action.task_id):
+        if evt.kind not in (
+            EventKind.TOOL_INVOCATION_COMPLETED,
+            EventKind.TOOL_INVOCATION_FAILED,
+        ):
+            continue
+        tool_name = evt.payload.get("tool_name")
+        if not tool_name or tool_name == "ask_user":
+            continue
+        try:
+            manifest = registry.get(tool_name)
+        except Exception:
+            # Tool gone from registry — still counts as a discovery attempt.
+            return True
+        if manifest.risk_level == "read_only" and not manifest.side_effects:
+            return True
+    return False
+
+
+def _discovery_tool_hints(ctx: PredicateContext) -> tuple[str, ...]:
+    names: list[str] = []
+    for manifest in ctx.kernel.registry.list_tools():
+        if manifest.name == "ask_user":
+            continue
+        if manifest.risk_level == "read_only" and not manifest.side_effects:
+            names.append(manifest.name)
+    if not names:
+        return ()
+    return (
+        "Доступные read-only tools для автономного поиска: " + ", ".join(sorted(names)),
+    )
+
+
 def _todo_node_exists(ctx: PredicateContext) -> PredicateOutcome:
     """Actions that reference a TODO node must reference a node that exists."""
     if ctx.todo_tree is None:
@@ -316,6 +399,7 @@ for _name, _fn in [
     ("allowed_actions_respected", _allowed_actions_respected),
     ("no_blind_retry", _no_blind_retry),
     ("clarification_depth", _clarification_depth),
+    ("discovery_before_clarification", _discovery_before_clarification),
     ("todo_node_exists", _todo_node_exists),
 ]:
     register_predicate(_name, _fn)

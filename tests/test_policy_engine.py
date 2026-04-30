@@ -127,3 +127,48 @@ def test_allow_when_clarification_in_diagnosis(make_settings) -> None:
     )
     decision = engine.check(action, kernel=kernel)
     assert decision.decision is PolicyDecisionKind.ALLOW
+
+
+def test_clarification_blocked_before_any_discovery(make_settings) -> None:
+    """First-turn ask_user_clarification must be denied with MUST_DISCOVER_FIRST."""
+    engine, kernel = _build(make_settings)
+    kernel.registry.register(FindFilesTool(workspace_root="/tmp"))
+    kernel.state.ensure_task("t1")
+    # Default READY mode + clarification in allowed list (as bootstrap motivation does).
+    kernel.state.set_allowed_actions("t1", ["ask_user_clarification", "tool_invocation"])
+    action = ActionRequest(
+        kind="ask_user_clarification",
+        actor="planner",
+        task_id="t1",
+        input={"question": "what file did you mean?"},
+        reason="no clue",
+    )
+    decision = engine.check(action, kernel=kernel)
+    assert decision.is_deny
+    assert decision.rejection.reason_code == "MUST_DISCOVER_FIRST"
+
+
+def test_clarification_allowed_after_readonly_tool(make_settings) -> None:
+    """A completed read-only tool invocation unlocks ask_user_clarification."""
+    from igla.protocol.event import EventKind
+
+    engine, kernel = _build(make_settings)
+    kernel.registry.register(FindFilesTool(workspace_root="/tmp"))
+    kernel.state.ensure_task("t1")
+    kernel.state.set_allowed_actions("t1", ["ask_user_clarification", "tool_invocation"])
+    # Simulate that the planner already ran find_files.
+    kernel.events.append(
+        kind=EventKind.TOOL_INVOCATION_COMPLETED,
+        actor="tool:find_files",
+        task_id="t1",
+        payload={"tool_name": "find_files", "status": "success"},
+    )
+    action = ActionRequest(
+        kind="ask_user_clarification",
+        actor="planner",
+        task_id="t1",
+        input={"question": "didn't find it — clarify?"},
+        reason="empty result",
+    )
+    decision = engine.check(action, kernel=kernel)
+    assert decision.decision is PolicyDecisionKind.ALLOW

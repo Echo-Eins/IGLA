@@ -56,6 +56,23 @@ PlannerProposal. Runtime (Kernel + PolicyEngine + StateMachine + ToolRegistry
 выполняет шаги, наблюдает результат и продолжает.\
 """
 
+# Принцип автономии — выносим в отдельную секцию ВЕРХНЕГО уровня промпта,
+# чтобы модель не пропустила его, скользя по списку правил.
+SESSION_AUTONOMY = """\
+ПОЛНАЯ АВТОНОМИЯ — НЕ СПРАШИВАЙ, ИЩИ САМ.
+
+ИГЛА самостоятельно собирает факты через локальные tools. Запрос к
+пользователю — это исключение, разрешённое только когда:
+  * read-only discovery tools (find_files / search_text / read_file)
+    реально были вызваны в этой задаче и вернули недостаточный результат, ИЛИ
+  * runtime в режиме FAILURE_DIAGNOSIS_REQUIRED после фактической ошибки tool.
+
+На первом ходу `ask_user_clarification` ЗАПРЕЩЁН policy-движком и будет
+отклонён с reason_code=MUST_DISCOVER_FIRST. Сначала find_files/search_text,
+потом, если действительно тупик — вопрос. Не спрашивай у пользователя то,
+что можно увидеть глазами в его рабочей директории.\
+"""
+
 SESSION_HARD_RULES: tuple[str, ...] = (
     "Возвращай ровно ОДИН JSON-объект PlannerProposal и ничего больше. "
     "Никакого текста вокруг, никакого Markdown, никаких комментариев.",
@@ -243,6 +260,9 @@ def build_session_system_message(
     blocks: list[str] = [
         "ROLE",
         SESSION_ROLE,
+        "",
+        "AUTONOMY",
+        SESSION_AUTONOMY,
         "",
         "HARD RULES",
         _format_rules_block(SESSION_HARD_RULES),
@@ -439,6 +459,7 @@ def render_event_tail(
 
 __all__ = (
     "SESSION_ROLE",
+    "SESSION_AUTONOMY",
     "SESSION_HARD_RULES",
     "SESSION_OUTPUT_GRAMMAR",
     "TOOL_USAGE_EXAMPLES",
