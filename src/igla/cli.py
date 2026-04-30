@@ -18,6 +18,7 @@ from rich.table import Table
 from . import __version__
 from .chat.repl import ChatREPL
 from .config import IglaSettings, load_settings
+from .console_io import attach_utf8_buffer, force_utf8_stdio
 from .kernel.kernel import Kernel
 from .planner.llm_client import LMStudioClient
 from .policies.constitution import load_constitution
@@ -162,6 +163,12 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> int:
+    # Make sure user input survives a misconfigured locale (LC_ALL=C,
+    # ASCII-only stdio, etc.). Without this, Cyrillic / emoji from input()
+    # raises UnicodeDecodeError before the REPL even sees the line.
+    force_utf8_stdio()
+    attach_utf8_buffer()
+
     parser = build_parser()
     args = parser.parse_args(argv)
     if not getattr(args, "func", None):

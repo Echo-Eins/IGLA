@@ -29,6 +29,7 @@ from rich.panel import Panel
 from rich.text import Text
 
 from ..config import IglaSettings
+from ..console_io import safe_readline
 from ..ids import prefixed_id
 from ..kernel.kernel import Kernel
 from ..motivation.cycle import MotivationCycle
@@ -67,6 +68,28 @@ class ChatTranscript:
         return self.entries[-n:]
 
 
+def _prompt_line(console: Console, prompt_markup: str) -> str:
+    """Read one line, surviving locale / decoding glitches.
+
+    Tries the rich prompt first (which gives nice ANSI handling); on any
+    UnicodeError we fall back to ``safe_readline`` which reads bytes from
+    ``sys.stdin.buffer`` and decodes with ``errors="replace"``. EOF and
+    KeyboardInterrupt return the empty string here; the REPL converts that
+    into "no input" instead of crashing the session.
+    """
+    try:
+        return console.input(prompt_markup)
+    except (EOFError, KeyboardInterrupt):
+        raise
+    except UnicodeError:
+        # Rich is unable to decode the byte stream — degrade gracefully.
+        try:
+            console.print(prompt_markup, end="")
+        except Exception:  # noqa: BLE001
+            pass
+        return safe_readline()
+
+
 class _RichAskUserChannel:
     """Channel implementation backed by the chat console."""
 
@@ -78,8 +101,8 @@ class _RichAskUserChannel:
         self._console.print(Panel(question, title="ИГЛА спрашивает", border_style="cyan"))
         self._transcript.add("igla", question)
         try:
-            answer = self._console.input("[bold]you[/bold]> ")
-        except EOFError:
+            answer = _prompt_line(self._console, "[bold]you[/bold]> ")
+        except (EOFError, KeyboardInterrupt):
             answer = ""
         self._transcript.add("user", answer)
         return answer
@@ -155,7 +178,7 @@ class ChatREPL:
         self.banner()
         while True:
             try:
-                line = self._console.input("[bold green]> [/bold green]")
+                line = _prompt_line(self._console, "[bold green]> [/bold green]")
             except (EOFError, KeyboardInterrupt):
                 self._console.print("\n[dim]session ended[/dim]")
                 return
@@ -219,7 +242,7 @@ class ChatREPL:
                 )
             )
             try:
-                answer = self._console.input("[bold]you[/bold]> ")
+                answer = _prompt_line(self._console, "[bold]you[/bold]> ")
             except (EOFError, KeyboardInterrupt):
                 self._console.print("\n[dim]задача прервана[/dim]")
                 return
