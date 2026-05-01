@@ -90,6 +90,7 @@ rules:
       - kind: set_allowed_actions
         args:
           actions:
+            - tool:list_dir
             - tool:find_files
             - tool:search_text
             - tool:read_file
@@ -135,6 +136,25 @@ rules:
       - kind: clear_forbidden_actions
       - kind: log_message
         args: { message: "Exiting FAILURE_DIAGNOSIS_REQUIRED" }
+
+  # ---------------------------------------------------------------------
+  # list_dir flow
+  # ---------------------------------------------------------------------
+  - id: log_workspace_structure_known
+    description: >
+      After list_dir completes, log that workspace structure was enumerated.
+      This provides an audit trail and confirms discovery ran successfully.
+    priority: 60
+    triggers:
+      - on_event: tool_invocation_completed
+    conditions:
+      - kind: tool_called_was
+        args: { name: list_dir }
+      - kind: result_status_was
+        args: { status: success }
+    effects:
+      - kind: log_message
+        args: { message: "Workspace directory structure enumerated via list_dir" }
 
   # ---------------------------------------------------------------------
   # Task completion

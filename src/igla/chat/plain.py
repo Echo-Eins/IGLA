@@ -28,6 +28,7 @@ from ..todo.tree import TodoTree
 from ..tools.builtin import (
     AskUserTool,
     FindFilesTool,
+    ListDirTool,
     NoopObserveTool,
     ReadFileTool,
     SearchTextTool,
@@ -119,6 +120,7 @@ class PlainCLI:
             [
                 ask_tool,
                 FindFilesTool(workspace_root=str(self._settings.paths.workspace)),
+                ListDirTool(workspace_root=str(self._settings.paths.workspace)),
                 ReadFileTool(
                     workspace_root=str(self._settings.paths.workspace),
                     receipts=self._kernel.receipts,

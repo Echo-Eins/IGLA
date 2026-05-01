@@ -63,12 +63,12 @@ SESSION_AUTONOMY = """\
 
 ИГЛА самостоятельно собирает факты через локальные tools. Запрос к
 пользователю — это исключение, разрешённое только когда:
-  * read-only discovery tools (find_files / search_text / read_file)
+  * read-only discovery tools (list_dir / find_files / search_text / read_file)
     реально были вызваны в этой задаче и вернули недостаточный результат, ИЛИ
   * runtime в режиме FAILURE_DIAGNOSIS_REQUIRED после фактической ошибки tool.
 
 На первом ходу `ask_user_clarification` ЗАПРЕЩЁН policy-движком и будет
-отклонён с reason_code=MUST_DISCOVER_FIRST. Сначала find_files/search_text,
+отклонён с reason_code=MUST_DISCOVER_FIRST. Сначала list_dir/find_files/search_text,
 потом, если действительно тупик — вопрос. Не спрашивай у пользователя то,
 что можно увидеть глазами в его рабочей директории.\
 """
@@ -86,14 +86,14 @@ SESSION_HARD_RULES: tuple[str, ...] = (
     "Не выдумывай состояние файлов, путей, команд, строк, логов или "
     "результатов tool. Если не знаешь — узнавай через tool, не через догадку.",
     "Прежде чем спрашивать пользователя про файлы или пути, обязательно "
-    "попробуй find_files и search_text. ask_user_clarification — последнее "
-    "средство, не первое.",
+    "попробуй list_dir, find_files и search_text. ask_user_clarification — "
+    "последнее средство, не первое.",
     "Как только результат tool даёт достаточно данных чтобы ответить на цель "
     "задачи — СРАЗУ вызывай declare_task_done с ответом в поле summary. "
     "Не вызывай больше tools если ответ уже есть в событиях.",
     "После ошибки tool ты в режиме FAILURE_DIAGNOSIS_REQUIRED. Запрещено "
     "вслепую повторять тот же класс действий. Сначала диагностика "
-    "(find_files / search_text / read_file), потом другая попытка.",
+    "(list_dir / find_files / search_text / read_file), потом другая попытка.",
     "Если предыдущий ход был отклонён (last_rejection), внимательно прочитай "
     "reason_code, message и hints — они содержат точный список доступных "
     "инструментов. Не повторяй тот же tool_name или tool_version.",
@@ -123,6 +123,24 @@ SESSION_OUTPUT_GRAMMAR = """\
 # contained for the model). Examples are illustrative, not exhaustive — the
 # canonical contract is `input_schema`.
 TOOL_USAGE_EXAMPLES: dict[str, list[dict[str, Any]]] = {
+    "list_dir": [
+        {
+            "intent": "Обзор структуры всего workspace перед началом задачи.",
+            "input": {"depth": 2},
+        },
+        {
+            "intent": "Изучить содержимое конкретной директории на один уровень.",
+            "input": {"path": "src/igla", "depth": 1},
+        },
+        {
+            "intent": (
+                "Развернуть поддиректорию глубже после первичного обзора. "
+                "Если depth > 4, будет DEPTH_LIMIT_EXCEEDED — используй меньший depth "
+                "и вызывай list_dir на каждой поддиректории отдельно."
+            ),
+            "input": {"path": "src/igla/tools", "depth": 3},
+        },
+    ],
     "find_files": [
         {
             "intent": "Найти файл по имени, когда пользователь упомянул только название.",

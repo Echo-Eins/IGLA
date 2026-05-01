@@ -88,19 +88,23 @@ PredicateFn = Callable[[PredicateContext], PredicateOutcome]
 
 PREDICATES: dict[str, PredicateFn] = {}
 
-_DISCOVERY_TOOL_NAMES = frozenset({"find_files", "search_text", "read_file"})
+_DISCOVERY_TOOL_NAMES = frozenset({"find_files", "search_text", "read_file", "list_dir"})
 _DISCOVERY_CAPABILITIES = frozenset(
     {
         "fs.find",
         "fs.discover",
         "fs.grep",
+        "fs.list",
         "fs.search_text",
         "fs.read",
         "core.find_files",
+        "core.list_dir",
         "core.search_text",
         "core.read_file",
     }
 )
+
+_LIST_DIR_DEPTH_LIMIT = 4
 
 
 def register_predicate(name: str, fn: PredicateFn) -> None:
@@ -353,13 +357,14 @@ def _discovery_before_clarification(ctx: PredicateContext) -> PredicateOutcome:
         message=(
             "IGLA не задаёт пользователю вопросов, пока сама не попробовала "
             "найти ответ. Сначала вызови один из read-only discovery tools "
-            "(например find_files, search_text, read_file). "
+            "(например list_dir, find_files, search_text, read_file). "
             "ask_user_clarification разрешён только после неудачной попытки "
             "поиска или в режиме FAILURE_DIAGNOSIS_REQUIRED."
         ),
         rule_id="discovery_before_clarification",
         hints=discovery_hints,
         allowed_next=(
+            "tool:list_dir",
             "tool:find_files",
             "tool:search_text",
             "tool:read_file",
@@ -438,6 +443,46 @@ def _is_discovery_manifest(manifest: ToolManifest) -> bool:
     return bool(_DISCOVERY_CAPABILITIES.intersection(manifest.capabilities))
 
 
+def _list_dir_depth_limit(ctx: PredicateContext) -> PredicateOutcome:
+    """Reject list_dir calls requesting depth above the hard policy limit.
+
+    The input schema allows depth up to 10 so the model sees a clear
+    policy rejection (with actionable hints) rather than a cryptic
+    schema validation error when it requests a deep walk.
+    """
+    if ctx.action.kind != "tool_invocation":
+        return PredicateOutcome.allow()
+    if ctx.action.tool_name != "list_dir":
+        return PredicateOutcome.allow()
+    raw_depth = (ctx.action.input or {}).get("depth")
+    if raw_depth is None:
+        return PredicateOutcome.allow()
+    try:
+        depth = int(raw_depth)
+    except (TypeError, ValueError):
+        return PredicateOutcome.allow()  # schema_validated will catch it
+    if depth <= _LIST_DIR_DEPTH_LIMIT:
+        return PredicateOutcome.allow()
+    return PredicateOutcome.deny(
+        reason_code="DEPTH_LIMIT_EXCEEDED",
+        message=(
+            f"list_dir depth={depth} exceeds the policy limit of "
+            f"{_LIST_DIR_DEPTH_LIMIT}. Use depth ≤ {_LIST_DIR_DEPTH_LIMIT}. "
+            f"To explore deeper trees, call list_dir again on a sub-directory "
+            f"returned in the previous result."
+        ),
+        rule_id="list_dir_depth_limit",
+        hints=[
+            f"Maximum allowed depth: {_LIST_DIR_DEPTH_LIMIT}",
+            (
+                "Strategy: list_dir root at depth=2, then call list_dir on each "
+                "sub-directory of interest at depth=2 for deeper exploration."
+            ),
+        ],
+        allowed_next=("tool:list_dir", "tool:find_files", "tool:search_text"),
+    )
+
+
 def _todo_node_exists(ctx: PredicateContext) -> PredicateOutcome:
     """Actions that reference a TODO node must reference a node that exists."""
     if ctx.todo_tree is None:
@@ -466,6 +511,7 @@ for _name, _fn in [
     ("no_blind_retry", _no_blind_retry),
     ("clarification_depth", _clarification_depth),
     ("discovery_before_clarification", _discovery_before_clarification),
+    ("list_dir_depth_limit", _list_dir_depth_limit),
     ("todo_node_exists", _todo_node_exists),
 ]:
     register_predicate(_name, _fn)

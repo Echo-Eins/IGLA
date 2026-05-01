@@ -40,3 +40,6 @@ predicates:
   - id: no_blind_retry
     enabled: true
     rule_id: no_blind_retry
+  - id: list_dir_depth_limit
+    enabled: true
+    rule_id: list_dir_depth_limit

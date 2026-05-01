@@ -31,6 +31,7 @@ from .state_reset import StateResetError, reset_workspace_state
 from .tools.builtin import (
     AskUserTool,
     FindFilesTool,
+    ListDirTool,
     NoopObserveTool,
     ReadFileTool,
     SearchTextTool,
@@ -168,6 +169,7 @@ def cmd_doctor(args: argparse.Namespace) -> int:
         [
             AskUserTool(channel=_DummyAsk()),
             FindFilesTool(workspace_root=str(settings.paths.workspace)),
+            ListDirTool(workspace_root=str(settings.paths.workspace)),
             ReadFileTool(
                 workspace_root=str(settings.paths.workspace),
                 receipts=kernel.receipts,

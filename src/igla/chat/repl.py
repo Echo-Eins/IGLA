@@ -47,6 +47,7 @@ from ..tools.builtin import (
     AskUserChannel,
     AskUserTool,
     FindFilesTool,
+    ListDirTool,
     NoopObserveTool,
     ReadFileTool,
     SearchTextTool,
@@ -138,6 +139,7 @@ class ChatREPL:
         ask_channel: AskUserChannel = _RichAskUserChannel(self._console, self._transcript)
         ask_tool = AskUserTool(channel=ask_channel)
         find_tool = FindFilesTool(workspace_root=str(settings.paths.workspace))
+        list_dir_tool = ListDirTool(workspace_root=str(settings.paths.workspace))
         read_tool = ReadFileTool(
             workspace_root=str(settings.paths.workspace),
             receipts=self._kernel.receipts,
@@ -145,7 +147,7 @@ class ChatREPL:
         search_tool = SearchTextTool(workspace_root=str(settings.paths.workspace))
         observe_tool = NoopObserveTool()
         self._kernel.registry.register_many(
-            [ask_tool, find_tool, read_tool, search_tool, observe_tool]
+            [ask_tool, find_tool, list_dir_tool, read_tool, search_tool, observe_tool]
         )
 
         constitution = load_constitution(settings.paths.constitution_file)
