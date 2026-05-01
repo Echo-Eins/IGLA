@@ -42,12 +42,21 @@ class ReceiptManager:
         content: str,
         bytes_read: int,
         step_id: str | None = None,
+        file_sha256: str | None = None,
     ) -> FileReadReceipt:
+        """Record a read receipt.
+
+        ``file_sha256`` is the SHA-256 of the *entire file on disk* at the
+        time of reading, irrespective of any partial-range slice the caller
+        may have requested. ``patch_file``'s ``hash_matches_receipt``
+        predicate relies on this value to detect stale writes.
+        """
         receipt = FileReadReceipt(
             receipt_id=prefixed_id("rcp"),
             kind=ReceiptKind.FILE_READ,
             path=path,
             sha256=_hash_text(content),
+            file_sha256=file_sha256,
             bytes_read=bytes_read,
             task_id=task_id,
             step_id=step_id,

@@ -17,6 +17,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from ..protocol.event import EventKind
@@ -500,6 +501,124 @@ def _todo_node_exists(ctx: PredicateContext) -> PredicateOutcome:
 
 
 # ---------------------------------------------------------------------------
+#  patch_file invariants                                                    #
+# ---------------------------------------------------------------------------
+
+
+_MUTATING_FILE_TOOLS = frozenset({"patch_file"})
+
+
+def _resolve_workspace_path(raw_path: str, workspace: Path) -> Path | None:
+    """Mirror of ``read_file``/``patch_file``'s ``_resolve``.
+
+    Returns the absolute resolved path inside the workspace, or ``None``
+    if the path escapes the workspace.
+    """
+    candidate = Path(raw_path)
+    if not candidate.is_absolute():
+        candidate = workspace / candidate
+    try:
+        resolved = candidate.resolve()
+    except OSError:
+        return None
+    try:
+        resolved.relative_to(workspace)
+    except ValueError:
+        return None
+    return resolved
+
+
+def _read_before_write(ctx: PredicateContext) -> PredicateOutcome:
+    """Mutating file tools require a prior ``read_file`` of the target.
+
+    The receipt also captures the file_sha256 we need for the next
+    invariant (``hash_matches_receipt``). Without a receipt we cannot
+    tell whether the model has actually seen the current file content.
+    """
+    if ctx.action.kind != "tool_invocation":
+        return PredicateOutcome.allow()
+    if ctx.action.tool_name not in _MUTATING_FILE_TOOLS:
+        return PredicateOutcome.allow()
+    raw_path = (ctx.action.input or {}).get("path")
+    if not raw_path:
+        return PredicateOutcome.allow()  # schema_validated will catch missing path
+
+    resolved = _resolve_workspace_path(str(raw_path), ctx.kernel.workspace)
+    if resolved is None:
+        # Workspace-bounds violation; the tool will reject it with
+        # PATH_OUTSIDE_WORKSPACE. Letting it through here keeps the
+        # error message tool-local instead of policy-local.
+        return PredicateOutcome.allow()
+
+    receipt = ctx.kernel.receipts.get_file_read(ctx.action.task_id, str(resolved))
+    if receipt is not None:
+        return PredicateOutcome.allow()
+
+    return PredicateOutcome.deny(
+        reason_code="MUST_READ_BEFORE_WRITE",
+        message=(
+            f"{ctx.action.tool_name} requires a prior read_file of '{raw_path}'. "
+            f"Call read_file first to record the current sha256, then patch."
+        ),
+        rule_id="read_before_write",
+        hints=[
+            (
+                "Sequence: read_file(path) → patch_file(path, "
+                "base_sha256=<file_sha256 from read_file>, ...)."
+            ),
+        ],
+        allowed_next=("tool:read_file", "todo_branch", "todo_complete"),
+    )
+
+
+def _hash_matches_receipt(ctx: PredicateContext) -> PredicateOutcome:
+    """``base_sha256`` in patch_file must match the stored read receipt.
+
+    Catches stale-write attempts before the tool even runs. The patch tool
+    independently re-validates against the on-disk file, so this predicate
+    is a fast-fail pre-check, not the only line of defence.
+    """
+    if ctx.action.kind != "tool_invocation":
+        return PredicateOutcome.allow()
+    if ctx.action.tool_name not in _MUTATING_FILE_TOOLS:
+        return PredicateOutcome.allow()
+    inp = ctx.action.input or {}
+    raw_path = inp.get("path")
+    base_sha256 = inp.get("base_sha256")
+    if not raw_path or not base_sha256:
+        return PredicateOutcome.allow()  # schema_validated covers missing fields
+
+    resolved = _resolve_workspace_path(str(raw_path), ctx.kernel.workspace)
+    if resolved is None:
+        return PredicateOutcome.allow()
+
+    receipt = ctx.kernel.receipts.get_file_read(ctx.action.task_id, str(resolved))
+    if receipt is None:
+        # read_before_write will deny separately.
+        return PredicateOutcome.allow()
+
+    receipt_full = receipt.file_sha256 or receipt.sha256
+    if str(base_sha256) == receipt_full:
+        return PredicateOutcome.allow()
+
+    return PredicateOutcome.deny(
+        reason_code="HASH_MISMATCH_FILE_CHANGED",
+        message=(
+            f"base_sha256 mismatch for '{raw_path}': "
+            f"receipt has file_sha256={receipt_full}, you supplied "
+            f"base_sha256={base_sha256}. The file (or your snapshot of it) "
+            f"is stale — call read_file again."
+        ),
+        rule_id="hash_matches_receipt",
+        hints=[
+            f"Expected base_sha256: {receipt_full}",
+            "If the file has actually changed on disk, re-read it before patching.",
+        ],
+        allowed_next=("tool:read_file", "todo_branch"),
+    )
+
+
+# ---------------------------------------------------------------------------
 
 
 for _name, _fn in [
@@ -512,6 +631,8 @@ for _name, _fn in [
     ("clarification_depth", _clarification_depth),
     ("discovery_before_clarification", _discovery_before_clarification),
     ("list_dir_depth_limit", _list_dir_depth_limit),
+    ("read_before_write", _read_before_write),
+    ("hash_matches_receipt", _hash_matches_receipt),
     ("todo_node_exists", _todo_node_exists),
 ]:
     register_predicate(_name, _fn)

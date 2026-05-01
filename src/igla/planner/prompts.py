@@ -94,6 +94,14 @@ SESSION_HARD_RULES: tuple[str, ...] = (
     "После ошибки tool ты в режиме FAILURE_DIAGNOSIS_REQUIRED. Запрещено "
     "вслепую повторять тот же класс действий. Сначала диагностика "
     "(list_dir / find_files / search_text / read_file), потом другая попытка.",
+    "patch_file требует обязательной последовательности: сначала read_file "
+    "того же пути, затем patch_file с base_sha256=<file_sha256 из read_file>. "
+    "Без свежего read_file политика отклонит patch (MUST_READ_BEFORE_WRITE / "
+    "HASH_MISMATCH_FILE_CHANGED). После каждого успешного patch_file файл "
+    "нужно перечитать перед следующим патчем — file_sha256 уже изменился.",
+    "patch_file — это либо new_content (полная замена), либо search+replacement "
+    "(точечная). Не используй оба сразу. Если search встречается несколько раз — "
+    "добавь больше контекста или поставь replace_all=true.",
     "Если предыдущий ход был отклонён (last_rejection), внимательно прочитай "
     "reason_code, message и hints — они содержат точный список доступных "
     "инструментов. Не повторяй тот же tool_name или tool_version.",
@@ -189,6 +197,58 @@ TOOL_USAGE_EXAMPLES: dict[str, list[dict[str, Any]]] = {
                 "Продолжать пока end_of_file=false."
             ),
             "input": {"path": "src/igla/planner/planner.py", "start_line": 1000, "end_line": 2000},
+        },
+    ],
+    "patch_file": [
+        {
+            "intent": (
+                "Точечная замена: заменить ровно одну строку. base_sha256 — это "
+                "поле file_sha256 из последнего read_file этого файла. Если в файле "
+                "несколько вхождений search, добавь больше контекста в search или "
+                "поставь replace_all=true."
+            ),
+            "input": {
+                "path": "src/igla/main.py",
+                "base_sha256": "sha256:0123abcd... (из read_file output.file_sha256)",
+                "search": "DEBUG = False",
+                "replacement": "DEBUG = True",
+            },
+        },
+        {
+            "intent": (
+                "Полная перезапись короткого файла: используй new_content. "
+                "Файл всё равно нужно сначала прочитать read_file и передать base_sha256."
+            ),
+            "input": {
+                "path": "configs/feature.toml",
+                "base_sha256": "sha256:abcd1234...",
+                "new_content": "[feature]\nenabled = true\n",
+            },
+        },
+        {
+            "intent": (
+                "Заменить все вхождения старого имени на новое (refactor). "
+                "Только когда search достаточно специфичный, чтобы не задеть лишнее."
+            ),
+            "input": {
+                "path": "src/igla/foo.py",
+                "base_sha256": "sha256:beef...",
+                "search": "old_name",
+                "replacement": "new_name",
+                "replace_all": True,
+            },
+        },
+    ],
+    "restore_file": [
+        {
+            "intent": (
+                "Откатить последний patch_file этого файла. backup_artifact_id — это "
+                "значение output.backup_artifact_id из соответствующего patch_file."
+            ),
+            "input": {
+                "backup_artifact_id": "art_01HX...",
+                "reason": "verifier failed после применения патча",
+            },
         },
     ],
     "ask_user": [

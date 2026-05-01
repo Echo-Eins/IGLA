@@ -43,3 +43,9 @@ predicates:
   - id: list_dir_depth_limit
     enabled: true
     rule_id: list_dir_depth_limit
+  - id: read_before_write
+    enabled: true
+    rule_id: read_before_write
+  - id: hash_matches_receipt
+    enabled: true
+    rule_id: hash_matches_receipt

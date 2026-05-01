@@ -14,6 +14,7 @@ from .executor import Executor, ExecutorContext
 from .kernel import Kernel
 from .receipt_manager import ReceiptManager
 from .registry import ToolRegistry
+from .rollback_manager import RollbackError, RollbackManager
 from .schema_validator import SchemaValidator
 from .state_machine import StateMachine
 
@@ -27,6 +28,8 @@ __all__ = [
     "Kernel",
     "KernelError",
     "ReceiptManager",
+    "RollbackError",
+    "RollbackManager",
     "SchemaValidator",
     "StateMachine",
     "SystemClock",

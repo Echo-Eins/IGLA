@@ -157,6 +157,45 @@ rules:
         args: { message: "Workspace directory structure enumerated via list_dir" }
 
   # ---------------------------------------------------------------------
+  # patch_file flow
+  # ---------------------------------------------------------------------
+  - id: mark_changed_condition_after_patch
+    description: >
+      A successful patch_file is, by definition, a change of the world.
+      Set ``changed_condition_declared`` so that if we ever land in
+      FAILURE_DIAGNOSIS_REQUIRED later, this prior mutation is visible to
+      the exit predicate.  This rule fires on success only; failed
+      patches are handled by ``enter_failure_diagnosis_on_step_failure``.
+    priority: 55
+    triggers:
+      - on_event: tool_invocation_completed
+    conditions:
+      - kind: tool_called_was
+        args: { name: patch_file }
+      - kind: result_status_was
+        args: { status: success }
+    effects:
+      - kind: set_flag
+        args: { flag: changed_condition_declared, value: true }
+      - kind: log_message
+        args: { message: "patch_file succeeded — changed_condition_declared" }
+
+  - id: log_restore_file_completed
+    description: >
+      Audit-trail message after restore_file runs successfully.
+    priority: 60
+    triggers:
+      - on_event: tool_invocation_completed
+    conditions:
+      - kind: tool_called_was
+        args: { name: restore_file }
+      - kind: result_status_was
+        args: { status: success }
+    effects:
+      - kind: log_message
+        args: { message: "restore_file reverted a prior patch_file" }
+
+  # ---------------------------------------------------------------------
   # Task completion
   # ---------------------------------------------------------------------
   - id: task_done_on_declare

@@ -49,7 +49,9 @@ from ..tools.builtin import (
     FindFilesTool,
     ListDirTool,
     NoopObserveTool,
+    PatchFileTool,
     ReadFileTool,
+    RestoreFileTool,
     SearchTextTool,
 )
 
@@ -145,9 +147,28 @@ class ChatREPL:
             receipts=self._kernel.receipts,
         )
         search_tool = SearchTextTool(workspace_root=str(settings.paths.workspace))
+        patch_tool = PatchFileTool(
+            workspace_root=str(settings.paths.workspace),
+            receipts=self._kernel.receipts,
+            rollback=self._kernel.rollback,
+        )
+        restore_tool = RestoreFileTool(
+            workspace_root=str(settings.paths.workspace),
+            receipts=self._kernel.receipts,
+            rollback=self._kernel.rollback,
+        )
         observe_tool = NoopObserveTool()
         self._kernel.registry.register_many(
-            [ask_tool, find_tool, list_dir_tool, read_tool, search_tool, observe_tool]
+            [
+                ask_tool,
+                find_tool,
+                list_dir_tool,
+                read_tool,
+                search_tool,
+                patch_tool,
+                restore_tool,
+                observe_tool,
+            ]
         )
 
         constitution = load_constitution(settings.paths.constitution_file)

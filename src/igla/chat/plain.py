@@ -30,7 +30,9 @@ from ..tools.builtin import (
     FindFilesTool,
     ListDirTool,
     NoopObserveTool,
+    PatchFileTool,
     ReadFileTool,
+    RestoreFileTool,
     SearchTextTool,
 )
 
@@ -126,6 +128,16 @@ class PlainCLI:
                     receipts=self._kernel.receipts,
                 ),
                 SearchTextTool(workspace_root=str(self._settings.paths.workspace)),
+                PatchFileTool(
+                    workspace_root=str(self._settings.paths.workspace),
+                    receipts=self._kernel.receipts,
+                    rollback=self._kernel.rollback,
+                ),
+                RestoreFileTool(
+                    workspace_root=str(self._settings.paths.workspace),
+                    receipts=self._kernel.receipts,
+                    rollback=self._kernel.rollback,
+                ),
                 NoopObserveTool(),
             ]
         )

@@ -27,6 +27,10 @@ class FileReadReceipt(BaseModel):
 
     path: str
     sha256: str
+    """SHA-256 of the content slice returned by ``read_file``."""
+    file_sha256: str | None = None
+    """SHA-256 of the full file at read time. Used by ``patch_file``'s
+    ``read_before_write`` and ``hash_matches_receipt`` invariants."""
     bytes_read: int
     read_mode: str = "full"
 

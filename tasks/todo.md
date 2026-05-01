@@ -132,5 +132,45 @@
 - Added plain CLI input cleanup for leaked backspace/delete and ANSI CSI sequences.
 - Added regressions for one-turn README discovery completion and input cleanup.
 - Verified with `pytest tests/`: 92 passed.
-- Verified changed files with `ruff check src/igla/planner/planner.py src/igla/console_io.py tests/test_planner_loop.py tests/test_console_io.py`.
-- Verified changed source files with `mypy src/igla/planner/planner.py src/igla/console_io.py`.
+
+# Feature: list_dir tool with depth + constitution + motivation
+
+- [x] Implement `list_dir` tool, depth-limited (max 4).
+- [x] Add `list_dir_depth_limit` constitution predicate.
+- [x] Update motivation to include `list_dir` in failure-diagnosis allowed actions and add `log_workspace_structure_known`.
+- [x] Register tool in cli/plain/repl wiring.
+- [x] Update planner prompts and TOOL_USAGE_EXAMPLES.
+- [x] Add comprehensive list_dir tests.
+
+## Review
+
+- `list_dir` returns a flat DFS-ordered tree with per-directory file/dir counts and an `expanded` flag so the model can decide whether to drill deeper without another round-trip.
+- `_DEPTH_LIMIT=4` enforced as a constitution predicate (`DEPTH_LIMIT_EXCEEDED`) with a strategy hint.
+- Verified with `pytest tests/`: 150 passed.
+
+# Feature: patch_file + RollbackManager
+
+- [x] Add `RollbackManager` kernel service backed by `ArtifactStore`.
+- [x] Add protocol envelopes: `SnapshotDescriptor`, `RollbackPlan`, `RollbackResult`.
+- [x] Extend `read_file` with `file_sha256` (full-file hash regardless of partial reads).
+- [x] Extend `FileReadReceipt` and `ReceiptManager` with `file_sha256`.
+- [x] Implement `patch_file` tool: read-before-write + hash-before-patch + backup-before-mutation; supports `new_content` and `search`+`replacement` modes.
+- [x] Implement `restore_file` tool for explicit revert via `backup_artifact_id`.
+- [x] Add constitution predicates `read_before_write` and `hash_matches_receipt`.
+- [x] Update motivation: `mark_changed_condition_after_patch`, `log_restore_file_completed`.
+- [x] Register tools in cli/plain/repl wiring.
+- [x] Update planner prompts and TOOL_USAGE_EXAMPLES.
+- [x] Add comprehensive tests for RollbackManager, patch_file, restore_file.
+
+## Review
+
+- **RollbackManager** delegates storage to `ArtifactStore`: every snapshot is an immutable artifact of type `FileSnapshot` with `original_path`/`task_id`/`step_id` metadata. Plans live in an in-process map keyed by `plan_id`. `execute(plan_id)` is best-effort across snapshots and returns a structured `RollbackResult` (does not raise).
+- **patch_file** enforces three invariants: prior `read_file` receipt exists, on-disk SHA-256 matches `base_sha256` (re-checked in the tool itself, not just at the policy layer), and a backup snapshot is created BEFORE any write. Atomic write via temp-file rename; on `WRITE_FAILED` the backup is restored best-effort.
+- Two patch modes: `new_content` (full replace) and `search`+`replacement` (point edit). Default `replace_all=false` makes ambiguous matches a hard rejection (`AMBIGUOUS_SEARCH`).
+- After a successful patch the read receipt is refreshed with the new `file_sha256`, so any follow-up patch must use the new hash. Iterative patches still need a fresh `read_file` of the target.
+- **restore_file** is the planner-callable form of `RollbackManager.restore_snapshot` keyed by `backup_artifact_id` from a prior `patch_file` output. The `original_path` is taken from the artifact metadata; the planner cannot redirect the restore.
+- **read_file** now exposes `file_sha256` (whole-file hash, regardless of partial reads) alongside `sha256` (slice hash). The same value is stored in the receipt for `hash_matches_receipt`.
+- Constitution predicates: `read_before_write` denies `patch_file` without a prior receipt for the resolved path; `hash_matches_receipt` denies when the supplied `base_sha256` differs from the stored receipt hash. Both give the model concrete `allowed_next` and hints.
+- Motivation: a successful `patch_file` sets `changed_condition_declared` so the runtime can later exit `FAILURE_DIAGNOSIS_REQUIRED` once the failure is classified.
+- Verified with `pytest tests/`: 199 passed (49 new tests across `test_rollback_manager.py` and `test_patch_file.py`).
+- Verified with `ruff check` on all changed source files: clean.

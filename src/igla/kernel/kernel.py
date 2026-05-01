@@ -16,6 +16,7 @@ from .evidence_store import EvidenceStore
 from .executor import Executor, ExecutorContext
 from .receipt_manager import ReceiptManager
 from .registry import ToolRegistry
+from .rollback_manager import RollbackManager
 from .schema_validator import SchemaValidator
 from .state_machine import StateMachine
 
@@ -40,6 +41,7 @@ class Kernel:
         self.artifacts = ArtifactStore(paths.artifacts_dir, self.clock)
         self.evidence = EvidenceStore(paths.state_dir / "evidence.jsonl", self.clock)
         self.receipts = ReceiptManager(paths.receipts_dir, self.clock)
+        self.rollback = RollbackManager(self.artifacts, self.clock)
         self.state = StateMachine(self.clock)
         self.validator = SchemaValidator()
         self.registry = registry or ToolRegistry()

@@ -6,6 +6,16 @@ range (``start_line`` / ``end_line``); without a range the tool refuses files
 longer than ``_LINE_LIMIT`` and returns a ``FILE_TOO_LARGE`` error with an
 iterative-read hint so the model knows exactly how to proceed.
 
+The output exposes two distinct hashes:
+
+* ``sha256``      — SHA-256 of the content slice returned to the caller.
+                    For a full read this equals the full-file hash; for a
+                    partial read it covers only those lines.
+* ``file_sha256`` — SHA-256 of the entire file on disk, regardless of the
+                    requested line range.  This is the value that
+                    ``patch_file`` requires as ``base_sha256`` to enforce
+                    read-before-write integrity.
+
 Path semantics:
 * Relative paths are resolved against ``workspace_root``.
 * Paths that escape the workspace are rejected (``PATH_OUTSIDE_WORKSPACE``).
@@ -17,6 +27,7 @@ Line numbering:
 """
 from __future__ import annotations
 
+import hashlib
 from pathlib import Path
 
 from ...kernel.receipt_manager import ReceiptManager
@@ -31,6 +42,10 @@ from ...protocol.manifest import (
 )
 from ...protocol.result import ToolError, ToolResult
 from ..base import Tool
+
+
+def _hash_bytes(data: bytes) -> str:
+    return "sha256:" + hashlib.sha256(data).hexdigest()
 
 _LINE_LIMIT = 1000
 
@@ -71,6 +86,7 @@ _OUTPUT_SCHEMA = {
         "end_of_file",
         "truncated",
         "sha256",
+        "file_sha256",
         "receipt_id",
     ],
     "properties": {
@@ -87,7 +103,17 @@ _OUTPUT_SCHEMA = {
             "type": "boolean",
             "description": "Always False — the tool never silently truncates.",
         },
-        "sha256": {"type": "string"},
+        "sha256": {
+            "type": "string",
+            "description": "SHA-256 of the content slice returned to the caller.",
+        },
+        "file_sha256": {
+            "type": "string",
+            "description": (
+                "SHA-256 of the entire file on disk. Pass this value as "
+                "patch_file.base_sha256 to enforce read-before-write."
+            ),
+        },
         "receipt_id": {"type": "string"},
     },
 }
@@ -155,6 +181,8 @@ class ReadFileTool(Tool):
                 message=f"failed to read {target}: {exc}",
             )
 
+        file_sha256 = _hash_bytes(raw)
+
         try:
             text = raw.decode("utf-8")
         except UnicodeDecodeError:
@@ -194,6 +222,7 @@ class ReadFileTool(Tool):
             content=content,
             bytes_read=len(content.encode("utf-8")),
             step_id=invocation.step_id,
+            file_sha256=file_sha256,
         )
 
         return ToolResult(
@@ -210,6 +239,7 @@ class ReadFileTool(Tool):
                 "end_of_file": end_of_file,
                 "truncated": False,
                 "sha256": receipt.sha256,
+                "file_sha256": file_sha256,
                 "receipt_id": receipt.receipt_id,
             },
         )

@@ -33,7 +33,9 @@ from .tools.builtin import (
     FindFilesTool,
     ListDirTool,
     NoopObserveTool,
+    PatchFileTool,
     ReadFileTool,
+    RestoreFileTool,
     SearchTextTool,
 )
 
@@ -175,6 +177,16 @@ def cmd_doctor(args: argparse.Namespace) -> int:
                 receipts=kernel.receipts,
             ),
             SearchTextTool(workspace_root=str(settings.paths.workspace)),
+            PatchFileTool(
+                workspace_root=str(settings.paths.workspace),
+                receipts=kernel.receipts,
+                rollback=kernel.rollback,
+            ),
+            RestoreFileTool(
+                workspace_root=str(settings.paths.workspace),
+                receipts=kernel.receipts,
+                rollback=kernel.rollback,
+            ),
             NoopObserveTool(),
         ]
     )

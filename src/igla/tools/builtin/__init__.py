@@ -1,15 +1,19 @@
 """Built-in tools used by the MVP runtime.
 
-The set is intentionally tiny:
+The set is intentionally small but split along risk lines:
 
-* ``ask_user`` — solicit input from the user via the chat channel.
-* ``read_file`` — read a workspace file and emit a FileSnapshot artifact +
-  a read receipt (consumed later by ``read_before_write``).
-* ``list_dir`` — list workspace directory contents with depth support.
-* ``noop_observe`` — declarative no-op used by the planner to log a
-  decision/observation without touching the world.
-* ``find_files`` / ``search_text`` — workspace-bounded discovery before
-  asking the user for paths or source locations.
+Read-only / discovery:
+* ``ask_user``         — solicit input from the user via the chat channel.
+* ``read_file``        — read a workspace file; emits a FileReadReceipt
+                          (consumed by ``read_before_write``).
+* ``list_dir``         — list workspace directory contents with depth.
+* ``find_files``       — workspace-bounded filename discovery.
+* ``search_text``      — workspace-bounded fixed-string search.
+* ``noop_observe``     — declarative no-op for the planner.
+
+Mutating (require backup + receipt invariants):
+* ``patch_file``       — edit a workspace file with mandatory backup.
+* ``restore_file``     — revert a prior patch_file invocation.
 
 The complex multi-step affordances (``ask_user_clarification``,
 ``todo_branch``, ``todo_complete``, ``declare_task_done``) are NOT tools —
@@ -21,7 +25,9 @@ proposals are for "navigated the TODO/plan".
 from .ask_user import AskUserChannel, AskUserTool, ConsoleAskUserChannel
 from .list_dir import ListDirTool
 from .noop_observe import NoopObserveTool
+from .patch_file import PatchFileTool
 from .read_file import ReadFileTool
+from .restore_file import RestoreFileTool
 from .search import FindFilesTool, SearchTextTool
 
 __all__ = [
@@ -31,7 +37,9 @@ __all__ = [
     "FindFilesTool",
     "ListDirTool",
     "NoopObserveTool",
+    "PatchFileTool",
     "ReadFileTool",
+    "RestoreFileTool",
     "SearchTextTool",
 ]
 
@@ -41,6 +49,7 @@ def build_default_toolset(
     ask_user_channel: AskUserChannel,
     workspace_root: str,
     receipts,  # ReceiptManager
+    rollback,  # RollbackManager
 ) -> list:
     """Construct the default in-process tool instances."""
     return [
@@ -49,5 +58,15 @@ def build_default_toolset(
         ListDirTool(workspace_root=workspace_root),
         ReadFileTool(workspace_root=workspace_root, receipts=receipts),
         SearchTextTool(workspace_root=workspace_root),
+        PatchFileTool(
+            workspace_root=workspace_root,
+            receipts=receipts,
+            rollback=rollback,
+        ),
+        RestoreFileTool(
+            workspace_root=workspace_root,
+            receipts=receipts,
+            rollback=rollback,
+        ),
         NoopObserveTool(),
     ]
