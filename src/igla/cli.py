@@ -102,7 +102,7 @@ def cmd_chat(args: argparse.Namespace) -> int:
     settings = _build_settings(args)
     llm = _make_llm(settings)
     try:
-        cli = PlainCLI(settings=settings, llm=llm)
+        cli = PlainCLI(settings=settings, llm=llm, rtlog=getattr(args, "rtlog", False))
         cli.run_loop()
     finally:
         llm.close()
@@ -117,7 +117,7 @@ def cmd_run(args: argparse.Namespace) -> int:
     settings = _build_settings(args)
     llm = _make_llm(settings)
     try:
-        cli = PlainCLI(settings=settings, llm=llm)
+        cli = PlainCLI(settings=settings, llm=llm, rtlog=getattr(args, "rtlog", False))
         outcome = cli.run_once(request)
     finally:
         llm.close()
@@ -248,6 +248,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--no-schema",
         action="store_true",
         help="Disable JSON Schema response_format (use json_object fallback)",
+    )
+    parser.add_argument(
+        "--rtlog",
+        action="store_true",
+        help="Real-time log: print each LLM request/response to the terminal",
     )
 
     sub = parser.add_subparsers(dest="cmd")

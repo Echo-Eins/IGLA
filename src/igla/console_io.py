@@ -142,3 +142,22 @@ def attach_utf8_buffer() -> None:
             setattr(sys, name, new)
         except Exception:  # noqa: BLE001
             pass
+
+
+def safe_print(*args: object, sep: str = " ", end: str = "\n", flush: bool = False) -> None:
+    """Print to stdout, always encoding as UTF-8 bytes via the raw buffer.
+
+    Bypasses the TextIOWrapper encoding layer so Cyrillic / emoji characters
+    are never mangled into ``\\uXXXX`` escape sequences even when the locale
+    configures stdout as ASCII with ``errors='backslashreplace'``.
+    """
+    text = sep.join(str(a) for a in args) + end
+    buf = getattr(sys.stdout, "buffer", None)
+    if buf is not None:
+        buf.write(text.encode("utf-8"))
+        if flush:
+            buf.flush()
+    else:
+        sys.stdout.write(text)
+        if flush:
+            sys.stdout.flush()

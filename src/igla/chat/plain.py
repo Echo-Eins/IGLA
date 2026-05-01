@@ -6,15 +6,17 @@ output is easy to copy into bug reports and includes the task event timeline.
 from __future__ import annotations
 
 import json
+from collections.abc import Iterable
 from dataclasses import dataclass, field
+from typing import Any
 
 from ..config import IglaSettings
-from ..console_io import safe_readline
+from ..console_io import safe_print, safe_readline
 from ..ids import prefixed_id
 from ..kernel.kernel import Kernel
 from ..motivation.cycle import MotivationCycle
 from ..motivation.rule import load_rules
-from ..planner.llm_client import LLMClient
+from ..planner.llm_client import LLMChatMessage, LLMClient
 from ..planner.planner import Planner, PlannerOutcome
 from ..policies.constitution import load_constitution
 from ..policies.engine import PolicyContext, PolicyEngine
@@ -40,6 +42,58 @@ from ..tools.builtin import (
 )
 
 
+class _RtlogLLMClient:
+    """Wraps any LLMClient and prints a compact real-time log of each turn."""
+
+    def __init__(self, inner: LLMClient) -> None:
+        self._inner = inner
+
+    def complete_json(
+        self,
+        *,
+        messages: Iterable[LLMChatMessage],
+        json_schema: dict[str, Any] | None,
+        schema_name: str = "PlannerProposal",
+    ) -> dict[str, Any]:
+        msgs = list(messages)
+        non_sys = [m for m in msgs if m.role != "system"]
+        total_chars = sum(len(m.content) for m in msgs)
+        safe_print(f"\n{'─' * 60}")
+        safe_print(f"[→ LLM] {len(msgs)} messages, {total_chars} chars total")
+        if non_sys:
+            last = non_sys[-1]
+            content = last.content
+            if len(content) > 1500:
+                content = content[:1500] + f"\n... [{len(last.content) - 1500} chars truncated]"
+            safe_print(f"[→ TURN]:\n{content}")
+
+        raw = self._inner.complete_json(
+            messages=msgs,
+            json_schema=json_schema,
+            schema_name=schema_name,
+        )
+
+        action = raw.get("action", "?")
+        tool = raw.get("tool_name", "")
+        inp = raw.get("input") or {}
+        reason = str(raw.get("reason", ""))
+        if tool:
+            params_str = json.dumps(inp, ensure_ascii=False, separators=(",", ":"))
+            if len(params_str) > 600:
+                params_str = params_str[:600] + "..."
+            safe_print(f"[← MODEL] action={action}  tool={tool}")
+            safe_print(f"[← PARAMS] {params_str}")
+        else:
+            safe_print(f"[← MODEL] action={action}")
+        if reason:
+            r = reason[:200] + "..." if len(reason) > 200 else reason
+            safe_print(f"[← REASON] {r}")
+        return raw
+
+    def close(self) -> None:
+        self._inner.close()
+
+
 @dataclass
 class PlainTranscript:
     entries: list[dict[str, str]] = field(default_factory=list)
@@ -54,7 +108,7 @@ class _PlainAskUserChannel:
 
     def ask(self, *, question: str, prompt_label: str | None = None) -> str:
         del prompt_label
-        print(f"QUESTION: {question}")
+        safe_print(f"QUESTION: {question}")
         self._transcript.add("igla", question)
         answer = safe_readline("you> ")
         self._transcript.add("user", answer)
@@ -62,9 +116,9 @@ class _PlainAskUserChannel:
 
 
 class PlainCLI:
-    def __init__(self, *, settings: IglaSettings, llm: LLMClient) -> None:
+    def __init__(self, *, settings: IglaSettings, llm: LLMClient, rtlog: bool = False) -> None:
         self._settings = settings
-        self._llm = llm
+        self._llm = _RtlogLLMClient(llm) if rtlog else llm
         self._transcript = PlainTranscript()
         self._wire_runtime()
 
@@ -74,9 +128,9 @@ class PlainCLI:
         self._planner = self._build_planner(self._llm)
 
     def run_loop(self) -> None:
-        print("IGLA plain CLI")
-        print(f"workspace: {self._settings.paths.workspace}")
-        print("commands: /quit /state /todo /reset-state")
+        safe_print("IGLA plain CLI")
+        safe_print(f"workspace: {self._settings.paths.workspace}")
+        safe_print("commands: /quit /state /todo /reset-state")
         while True:
             text = safe_readline("> ").strip()
             if not text:
@@ -100,20 +154,20 @@ class PlainCLI:
         todo.create_root(title=raw_request[:120], description=raw_request)
         self._todo_store.save(todo)
 
-        print(f"TASK {task.task_id}")
-        print(f"GOAL {raw_request}")
+        safe_print(f"TASK {task.task_id}")
+        safe_print(f"GOAL {raw_request}")
 
         try:
             outcome = self._planner.run_task(task, todo)
             while outcome.status is TaskStatus.NEEDS_USER_CLARIFICATION:
                 question = self._latest_clarifying_question(todo)
-                print(f"QUESTION: {question or '(missing clarification question)'}")
+                safe_print(f"QUESTION: {question or '(missing clarification question)'}")
                 answer = safe_readline("you> ")
                 self._transcript.add("user", answer)
                 outcome = self._planner.handle_user_input(task=task, todo=todo, text=answer)
         except Exception as exc:  # noqa: BLE001 - plain debug boundary
-            print("STATUS crashed")
-            print(f"ERROR {exc.__class__.__name__}: {exc}")
+            safe_print("STATUS crashed")
+            safe_print(f"ERROR {exc.__class__.__name__}: {exc}")
             raise
 
         self._render_finish(outcome, todo)
@@ -175,18 +229,18 @@ class PlainCLI:
         )
 
     def _render_finish(self, outcome: PlannerOutcome, todo: TodoTree) -> None:
-        print(f"STATUS {outcome.status.value}")
-        print(f"TASK {outcome.task_id}")
-        print(f"ITERATIONS {outcome.iterations}")
+        safe_print(f"STATUS {outcome.status.value}")
+        safe_print(f"TASK {outcome.task_id}")
+        safe_print(f"ITERATIONS {outcome.iterations}")
         if outcome.summary:
-            print(f"SUMMARY {outcome.summary}")
+            safe_print(f"SUMMARY {outcome.summary}")
         if outcome.aborted_reason:
-            print(f"REASON {outcome.aborted_reason}")
-        print("TODO")
-        print(render_text(todo.snapshot(), with_ids=True))
-        print("EVENTS")
+            safe_print(f"REASON {outcome.aborted_reason}")
+        safe_print("TODO")
+        safe_print(render_text(todo.snapshot(), with_ids=True))
+        safe_print("EVENTS")
         for event in self._kernel.events.list_by_task(outcome.task_id):
-            print(_render_event(event))
+            safe_print(_render_event(event))
 
     def _handle_command(self, line: str) -> bool:
         command, _, rest = line.partition(" ")
@@ -194,11 +248,11 @@ class PlainCLI:
         if command in {"/quit", "/exit"}:
             return True
         if command == "/state":
-            print(f"workspace: {self._settings.paths.workspace}")
-            print(f"state_dir: {self._settings.paths.state_dir}")
-            print(f"events: {sum(1 for _ in self._kernel.events.iter_all())}")
+            safe_print(f"workspace: {self._settings.paths.workspace}")
+            safe_print(f"state_dir: {self._settings.paths.state_dir}")
+            safe_print(f"events: {sum(1 for _ in self._kernel.events.iter_all())}")
             tools = ", ".join(m.name for m in self._kernel.registry.list_tools())
-            print(f"tools: {tools}")
+            safe_print(f"tools: {tools}")
             return False
         if command == "/reset-state":
             try:
@@ -207,26 +261,26 @@ class PlainCLI:
                     state_dir=self._settings.paths.state_dir,
                 )
             except StateResetError as exc:
-                print(f"ERROR {exc}")
+                safe_print(f"ERROR {exc}")
                 return False
             self._wire_runtime()
             if result.removed:
-                print(f"STATE_RESET removed {result.state_dir}")
+                safe_print(f"STATE_RESET removed {result.state_dir}")
             else:
-                print(f"STATE_RESET already_absent {result.state_dir}")
+                safe_print(f"STATE_RESET already_absent {result.state_dir}")
             return False
         if command == "/todo":
             task_id = rest.strip() or self._last_task_id()
             if not task_id:
-                print("no tasks")
+                safe_print("no tasks")
                 return False
             snapshot = self._todo_store.load_snapshot(task_id)
             if snapshot is None:
-                print(f"task not found: {task_id}")
+                safe_print(f"task not found: {task_id}")
                 return False
-            print(render_text(snapshot, with_ids=True))
+            safe_print(render_text(snapshot, with_ids=True))
             return False
-        print(f"unknown command: {command}")
+        safe_print(f"unknown command: {command}")
         return False
 
     def _last_task_id(self) -> str | None:
