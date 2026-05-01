@@ -880,7 +880,6 @@ def _compact_tool_output(tool_name: str, output: dict[str, Any]) -> dict[str, An
             "truncated": output.get("truncated"),
             "summary": output.get("summary"),
         }
-
     return {
         key: _truncate_text(value, 500) if isinstance(value, str) else value
         for key, value in output.items()

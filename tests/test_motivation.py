@@ -122,6 +122,102 @@ def test_user_input_resumes_after_clarification(make_settings) -> None:
     assert state.mode is RuntimeMode.READY
 
 
+def test_patch_ambiguous_search_bypasses_failure_diagnosis(make_settings) -> None:
+    """AMBIGUOUS_SEARCH from patch_file must return immediately to READY.
+
+    Without the exit_failure_diagnosis_for_patch_planner_error rule the system
+    deadlocks: patch_file is blocked in FAILURE_DIAGNOSIS_REQUIRED, yet the
+    exit condition requires changed_condition_declared which is set only by a
+    successful patch_file.
+    """
+    kernel, cycle = _setup(make_settings)
+    cycle.dispatch(
+        kernel.events.append(kind=EventKind.TASK_CREATED, actor="runtime", task_id="t1")
+    )
+    evt = kernel.events.append(
+        kind=EventKind.TOOL_INVOCATION_FAILED,
+        actor="tool:patch_file",
+        task_id="t1",
+        step_id="s1",
+        payload={
+            "tool_name": "patch_file",
+            "status": "failed",
+            "error_code": "AMBIGUOUS_SEARCH",
+        },
+    )
+    cycle.dispatch(evt)
+    state = kernel.state.get_state("t1")
+    assert state.mode is RuntimeMode.READY, f"expected READY, got {state.mode}"
+    assert "tool_invocation" in state.allowed_next_actions
+    assert "declare_task_done" in state.allowed_next_actions
+    assert "declare_task_done" not in state.forbidden_next_actions
+
+
+def test_patch_search_not_found_bypasses_failure_diagnosis(make_settings) -> None:
+    kernel, cycle = _setup(make_settings)
+    cycle.dispatch(
+        kernel.events.append(kind=EventKind.TASK_CREATED, actor="runtime", task_id="t1")
+    )
+    evt = kernel.events.append(
+        kind=EventKind.TOOL_INVOCATION_FAILED,
+        actor="tool:patch_file",
+        task_id="t1",
+        step_id="s1",
+        payload={
+            "tool_name": "patch_file",
+            "status": "failed",
+            "error_code": "SEARCH_NOT_FOUND",
+        },
+    )
+    cycle.dispatch(evt)
+    state = kernel.state.get_state("t1")
+    assert state.mode is RuntimeMode.READY
+
+
+def test_patch_world_failure_stays_in_diagnosis(make_settings) -> None:
+    """HASH_MISMATCH is a world-state failure — must stay in FAILURE_DIAGNOSIS_REQUIRED."""
+    kernel, cycle = _setup(make_settings)
+    cycle.dispatch(
+        kernel.events.append(kind=EventKind.TASK_CREATED, actor="runtime", task_id="t1")
+    )
+    evt = kernel.events.append(
+        kind=EventKind.TOOL_INVOCATION_FAILED,
+        actor="tool:patch_file",
+        task_id="t1",
+        step_id="s1",
+        payload={
+            "tool_name": "patch_file",
+            "status": "failed",
+            "error_code": "HASH_MISMATCH",
+        },
+    )
+    cycle.dispatch(evt)
+    state = kernel.state.get_state("t1")
+    assert state.mode is RuntimeMode.FAILURE_DIAGNOSIS_REQUIRED
+
+
+def test_non_patch_tool_failure_stays_in_diagnosis(make_settings) -> None:
+    """AMBIGUOUS_SEARCH from a non-patch_file tool should not trigger the bypass."""
+    kernel, cycle = _setup(make_settings)
+    cycle.dispatch(
+        kernel.events.append(kind=EventKind.TASK_CREATED, actor="runtime", task_id="t1")
+    )
+    evt = kernel.events.append(
+        kind=EventKind.TOOL_INVOCATION_FAILED,
+        actor="tool:read_file",
+        task_id="t1",
+        step_id="s1",
+        payload={
+            "tool_name": "read_file",
+            "status": "failed",
+            "error_code": "AMBIGUOUS_SEARCH",
+        },
+    )
+    cycle.dispatch(evt)
+    state = kernel.state.get_state("t1")
+    assert state.mode is RuntimeMode.FAILURE_DIAGNOSIS_REQUIRED
+
+
 def test_task_completed_event_marks_task_done(make_settings) -> None:
     kernel, cycle = _setup(make_settings)
     cycle.dispatch(

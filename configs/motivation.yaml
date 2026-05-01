@@ -145,6 +145,44 @@ rules:
       - kind: log_message
         args: { message: "Recovered from large-file read diagnosis" }
 
+  - id: exit_failure_diagnosis_for_patch_planner_error
+    description: >
+      AMBIGUOUS_SEARCH, SEARCH_NOT_FOUND, and MISSING_PATCH_CONTENT are
+      planner reasoning failures, not world-state failures. The file was not
+      mutated; there is nothing to diagnose. Immediately override the mode
+      back to READY so patch_file is allowed on the very next turn. Without
+      this rule the system deadlocks: patch_file is blocked in
+      FAILURE_DIAGNOSIS_REQUIRED, yet the only way to exit that mode is via
+      a successful patch_file (changed_condition_declared). The model loops
+      on read-only tools until the context window overflows.
+    priority: 36
+    triggers:
+      - on_event: tool_invocation_failed
+    conditions:
+      - kind: tool_called_was
+        args: { name: patch_file }
+      - kind: payload_in
+        args:
+          path: error_code
+          values:
+            - AMBIGUOUS_SEARCH
+            - SEARCH_NOT_FOUND
+            - MISSING_PATCH_CONTENT
+    effects:
+      - kind: set_mode
+        args: { mode: ready }
+      - kind: set_allowed_actions
+        args:
+          actions:
+            - tool_invocation
+            - ask_user_clarification
+            - todo_branch
+            - todo_complete
+            - declare_task_done
+      - kind: clear_forbidden_actions
+      - kind: log_message
+        args: { message: "Patch planner-class error — returned to READY, patch_file re-allowed" }
+
   - id: exit_failure_diagnosis_when_classified
     description: >
       Leave failure diagnosis when the planner has classified the failure

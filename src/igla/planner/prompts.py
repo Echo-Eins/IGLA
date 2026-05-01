@@ -105,6 +105,21 @@ SESSION_HARD_RULES: tuple[str, ...] = (
     "patch_file — это либо new_content (полная замена), либо search+replacement "
     "(точечная). Не используй оба сразу. Если search встречается несколько раз — "
     "добавь больше контекста или поставь replace_all=true.",
+    "AMBIGUOUS_SEARCH: поиск нашёл несколько совпадений. Расширь строку search — "
+    "добавь соседние уникальные строки выше/ниже, пока совпадение не станет единственным. "
+    "Альтернатива: replace_all=true если нужно заменить все вхождения. "
+    "Никогда не читай файл заново только из-за AMBIGUOUS_SEARCH — у тебя уже есть "
+    "file_sha256 и контент из предыдущего read_file.",
+    "SEARCH_NOT_FOUND: строка search не найдена дословно. Используй search_text чтобы "
+    "найти точное написание нужного фрагмента в файле — не угадывай по памяти. "
+    "После search_text сразу patch_file с уточнённой строкой.",
+    "Если read_file вернул content_excerpt_truncated=true — это нормально. У тебя уже "
+    "есть file_sha256 и часть содержимого. Немедленно используй patch_file с "
+    "search+replacement (уникальная строка из прочитанного фрагмента). Не читай файл "
+    "снова — полный контент не нужен для точечного патча. Чтобы добавить текст в конец "
+    "большого файла: прочитай последние N строк (start_line=<last_chunk>, end_line=<total>), "
+    "затем patch_file с search=<последняя уникальная строка файла> и "
+    "replacement=<та же строка>\\n<новый текст>.",
     "Если предыдущий ход был отклонён (last_rejection), внимательно прочитай "
     "reason_code, message и hints — они содержат точный список доступных "
     "инструментов. Не повторяй тот же tool_name или tool_version.",
@@ -288,7 +303,7 @@ TOOL_USAGE_EXAMPLES: dict[str, list[dict[str, Any]]] = {
             },
         },
     ],
-"verify_file": [
+    "verify_file": [
         {
             "intent": (
                 "Проверить файл, который ты ТОЛЬКО ЧТО патчил/читал. Без аргумента "
@@ -655,7 +670,7 @@ def render_event_tail(
             "step_id": evt.step_id,
             "payload_keys": sorted(evt.payload.keys()),
         }
-        for field in ("status", "tool_name", "message", "rule", "reason_code", "answer"):
+        for field in ("status", "tool_name", "error_code", "message", "rule", "reason_code", "answer"):
             if field in evt.payload and not isinstance(evt.payload[field], (dict, list)):
                 digest[field] = evt.payload[field]
         if "output" in evt.payload and isinstance(evt.payload["output"], dict):
