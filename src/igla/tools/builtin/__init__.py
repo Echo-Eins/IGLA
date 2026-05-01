@@ -9,6 +9,8 @@ Read-only / discovery:
 * ``list_dir``         — list workspace directory contents with depth.
 * ``find_files``       — workspace-bounded filename discovery.
 * ``search_text``      — workspace-bounded fixed-string search.
+* ``verify_file``      — receipt-gated file verifier (syntax/lint/pytest).
+* ``read_task_log``    — read the model's own per-task work history.
 * ``noop_observe``     — declarative no-op for the planner.
 
 Mutating (require backup + receipt invariants):
@@ -27,8 +29,10 @@ from .list_dir import ListDirTool
 from .noop_observe import NoopObserveTool
 from .patch_file import PatchFileTool
 from .read_file import ReadFileTool
+from .read_task_log import ReadTaskLogTool
 from .restore_file import RestoreFileTool
 from .search import FindFilesTool, SearchTextTool
+from .verify_file import VerifyFileTool
 
 __all__ = [
     "AskUserChannel",
@@ -39,8 +43,10 @@ __all__ = [
     "NoopObserveTool",
     "PatchFileTool",
     "ReadFileTool",
+    "ReadTaskLogTool",
     "RestoreFileTool",
     "SearchTextTool",
+    "VerifyFileTool",
 ]
 
 
@@ -50,6 +56,7 @@ def build_default_toolset(
     workspace_root: str,
     receipts,  # ReceiptManager
     rollback,  # RollbackManager
+    work_log,  # TaskWorkLog
 ) -> list:
     """Construct the default in-process tool instances."""
     return [
@@ -68,5 +75,11 @@ def build_default_toolset(
             receipts=receipts,
             rollback=rollback,
         ),
+        VerifyFileTool(
+            workspace_root=workspace_root,
+            receipts=receipts,
+        ),
+        ReadTaskLogTool(work_log=work_log),
+
         NoopObserveTool(),
     ]

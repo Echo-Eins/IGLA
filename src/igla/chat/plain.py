@@ -32,8 +32,10 @@ from ..tools.builtin import (
     NoopObserveTool,
     PatchFileTool,
     ReadFileTool,
+    ReadTaskLogTool,
     RestoreFileTool,
     SearchTextTool,
+    VerifyFileTool,
 )
 
 
@@ -138,6 +140,12 @@ class PlainCLI:
                     receipts=self._kernel.receipts,
                     rollback=self._kernel.rollback,
                 ),
+                VerifyFileTool(
+                    workspace_root=str(self._settings.paths.workspace),
+                    receipts=self._kernel.receipts,
+                ),
+                ReadTaskLogTool(work_log=self._kernel.work_log),
+
                 NoopObserveTool(),
             ]
         )

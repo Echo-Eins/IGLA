@@ -94,6 +94,8 @@ rules:
             - tool:find_files
             - tool:search_text
             - tool:read_file
+            - tool:verify_file
+            - tool:read_task_log
             - ask_user_clarification
             - todo_branch
             - todo_complete
@@ -194,6 +196,48 @@ rules:
     effects:
       - kind: log_message
         args: { message: "restore_file reverted a prior patch_file" }
+
+  # ---------------------------------------------------------------------
+  # verify_file flow
+  # ---------------------------------------------------------------------
+  - id: log_verify_file_completed
+    description: >
+      Audit-trail message after verify_file runs. The actual pass/fail
+      outcome is in the tool output (overall_passed); the model decides
+      whether to keep the patch, re-patch, or restore. Rollback is NOT
+      automatic — the verifier is advisory.
+    priority: 60
+    triggers:
+      - on_event: tool_invocation_completed
+    conditions:
+      - kind: tool_called_was
+        args: { name: verify_file }
+      - kind: result_status_was
+        args: { status: success }
+    effects:
+      - kind: log_message
+        args: { message: "verify_file completed — see overall_passed in result" }
+
+  # ---------------------------------------------------------------------
+  # Memory: read_task_log
+  # ---------------------------------------------------------------------
+  - id: log_task_log_read
+    description: >
+      Audit-trail message after read_task_log returns. Reading the task
+      work log does not unlock any new actions; it just gives the model
+      a compact view of its own history when the prompt event tail is no
+      longer enough.
+    priority: 60
+    triggers:
+      - on_event: tool_invocation_completed
+    conditions:
+      - kind: tool_called_was
+        args: { name: read_task_log }
+      - kind: result_status_was
+        args: { status: success }
+    effects:
+      - kind: log_message
+        args: { message: "read_task_log returned the per-task work history" }
 
   # ---------------------------------------------------------------------
   # Task completion

@@ -1,0 +1,29 @@
+Задача:
+Приступай к разработке и написанию Verifier для patch_file (запуск pytest/ruff/syntax-check после патча; авто-rollback при failure). Только rollback должен быть по указанию модели или иной логике, а не сразу. У нас же, условно, если модель редактирует файл, то она делает его копию и работает с копией. Если она допустила маленькую ошибку, то копию явно не стоит откатывать к изначальному состоянию. Аналогично и с новыми, созданными файлами: одна ошибка не означает, что модель должна начинать с нуля.
+Также нужны verifier'ы для json, yaml, python и прочих известных конструкций (после завершения задачи по написанию кода напишешь, что и как настроить).
+Должна быть четко, удобно и конкретно продумана структура verifier'а, чтобы модель могла только вызывать соответствующую команду, указывать путь к файлу, который она не просто знает, но и над которым она работает или работала (пока пусть она может запускать только юнит тесты, если она их найдет в рабочей директории или применять проверку только к тем файлам, над которыми она работала или работает).
+Возможно, стоит дать ей diff или что-то такое.  Ну и в связи с этим также начать подготавливать структуру памяти, так как такие "сложные" задачи без памяти не решить. Можно начать с реализации памяти определенной задачи: модель помнит и хранит свои разработки, действия и порядок работы в лог файле определенной задачи, когда она отправляет task_done, то этот файл закрывается.
+Уже потом сделаем ей долгосрочную память с дедупом и сделаем так, чтобы она четко помнила  сведения о системе, которые добыла таким вот образом (выполнением большого количества разнообразных операций)
+
+Часть задачи уже выполнена (проверить посследний коммит по diff).
+
+Продолжать с места:
+Let me also check the discovery predicate — verify_file/read_task_log probably should NOT count as discovery (they don't help find new info; the model should still try list_dir/find_files first). I'll leave the predicate as-is.
+
+Now let me also check how existing failure-diagnosis tests work and check the discovery_before_clarification predicate to make sure I don't break anything:
+
+
+Ran 2 commands, read a file
+Ran
+Find discovery tools list
+Read
+predicates.py
+Ran
+Find discovery tool name list
+Let me check if build_default_toolset is called anywhere that needs update:
+
+Ran
+Find callers of build_default_toolset
+Bash
+$ grep -rn "build_default_toolset" /home/user/IGLA/src/ /home/user/IGLA/tests/
+/home/user/IGLA/src/igla/tools/builtin/__init__.py:53:def build_default_toolset(

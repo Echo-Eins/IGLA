@@ -831,6 +831,35 @@ def _compact_tool_output(tool_name: str, output: dict[str, Any]) -> dict[str, An
             "content_excerpt": _truncate_text(content, 4000),
             "receipt_id": output.get("receipt_id"),
         }
+    if tool_name == "verify_file":
+        results = [
+            {
+                "check": r.get("check"),
+                "passed": r.get("passed"),
+                "skipped": r.get("skipped", False),
+                "error": _truncate_text(str(r.get("error", "")), 300) if r.get("error") else None,
+                "exit_code": r.get("exit_code"),
+            }
+            for r in list(output.get("results") or [])
+            if isinstance(r, dict)
+        ]
+        return {
+            "path": output.get("path"),
+            "file_type": output.get("file_type"),
+            "checks_run": output.get("checks_run"),
+            "overall_passed": output.get("overall_passed"),
+            "results": results,
+        }
+    if tool_name == "read_task_log":
+        return {
+            "task_id": output.get("task_id"),
+            "closed": output.get("closed"),
+            "total_entries": output.get("total_entries"),
+            "returned_entries": output.get("returned_entries"),
+            "truncated": output.get("truncated"),
+            "summary": output.get("summary"),
+        }
+
     return {
         key: _truncate_text(value, 500) if isinstance(value, str) else value
         for key, value in output.items()

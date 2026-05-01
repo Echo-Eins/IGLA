@@ -51,8 +51,10 @@ from ..tools.builtin import (
     NoopObserveTool,
     PatchFileTool,
     ReadFileTool,
+    ReadTaskLogTool,
     RestoreFileTool,
     SearchTextTool,
+    VerifyFileTool,
 )
 
 
@@ -157,6 +159,12 @@ class ChatREPL:
             receipts=self._kernel.receipts,
             rollback=self._kernel.rollback,
         )
+        verify_tool = VerifyFileTool(
+            workspace_root=str(settings.paths.workspace),
+            receipts=self._kernel.receipts,
+        )
+        read_log_tool = ReadTaskLogTool(work_log=self._kernel.work_log)
+
         observe_tool = NoopObserveTool()
         self._kernel.registry.register_many(
             [
@@ -167,6 +175,8 @@ class ChatREPL:
                 search_tool,
                 patch_tool,
                 restore_tool,
+                verify_tool,
+                read_log_tool,
                 observe_tool,
             ]
         )

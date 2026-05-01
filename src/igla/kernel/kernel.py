@@ -19,6 +19,7 @@ from .registry import ToolRegistry
 from .rollback_manager import RollbackManager
 from .schema_validator import SchemaValidator
 from .state_machine import StateMachine
+from .task_work_log import TaskWorkLog
 
 
 class Kernel:
@@ -42,6 +43,7 @@ class Kernel:
         self.evidence = EvidenceStore(paths.state_dir / "evidence.jsonl", self.clock)
         self.receipts = ReceiptManager(paths.receipts_dir, self.clock)
         self.rollback = RollbackManager(self.artifacts, self.clock)
+        self.work_log = TaskWorkLog(self.events)
         self.state = StateMachine(self.clock)
         self.validator = SchemaValidator()
         self.registry = registry or ToolRegistry()

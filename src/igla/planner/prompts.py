@@ -251,6 +251,60 @@ TOOL_USAGE_EXAMPLES: dict[str, list[dict[str, Any]]] = {
             },
         },
     ],
+"verify_file": [
+        {
+            "intent": (
+                "Проверить файл, который ты ТОЛЬКО ЧТО патчил/читал. Без аргумента "
+                "checks инструмент сам выберет проверки по расширению: .py → "
+                "syntax+lint, .json → syntax, .yaml/.yml → syntax. pytest никогда "
+                "не запускается автоматически — только если явно указать checks."
+            ),
+            "input": {
+                "path": "src/igla/foo.py",
+                "reason": "после patch_file проверяем синтаксис и lint",
+            },
+        },
+        {
+            "intent": (
+                "Запустить pytest на конкретном тестовом файле. test_path обязателен "
+                "при checks=['pytest'], должен лежать внутри workspace."
+            ),
+            "input": {
+                "path": "src/igla/foo.py",
+                "checks": ["pytest"],
+                "test_path": "tests/test_foo.py",
+                "reason": "проверить что patch не сломал тесты",
+            },
+        },
+        {
+            "intent": (
+                "Только синтаксис (например, для большого файла когда lint избыточен). "
+                "verify_file требует наличия read_file/patch_file receipt для path."
+            ),
+            "input": {
+                "path": "configs/motivation.yaml",
+                "checks": ["syntax"],
+            },
+        },
+    ],
+    "read_task_log": [
+        {
+            "intent": (
+                "Получить компактную историю своей работы в текущей задаче: "
+                "вызовы tool, статусы, отказы политики, файлы которые ты трогал. "
+                "Полезно при длинной задаче, когда хвост событий уже не помещается "
+                "в текущий промпт."
+            ),
+            "input": {"reason": "проверяю что уже сделано"},
+        },
+        {
+            "intent": (
+                "Сократить до последних 20 шагов когда задача длинная. Свежие записи "
+                "сохраняются — старые отбрасываются."
+            ),
+            "input": {"max_entries": 20},
+        },
+    ],
     "ask_user": [
         {
             "intent": (

@@ -35,8 +35,10 @@ from .tools.builtin import (
     NoopObserveTool,
     PatchFileTool,
     ReadFileTool,
+    ReadTaskLogTool,
     RestoreFileTool,
     SearchTextTool,
+    VerifyFileTool,
 )
 
 
@@ -187,6 +189,12 @@ def cmd_doctor(args: argparse.Namespace) -> int:
                 receipts=kernel.receipts,
                 rollback=kernel.rollback,
             ),
+            VerifyFileTool(
+                workspace_root=str(settings.paths.workspace),
+                receipts=kernel.receipts,
+            ),
+            ReadTaskLogTool(work_log=kernel.work_log),
+
             NoopObserveTool(),
         ]
     )

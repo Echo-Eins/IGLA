@@ -17,6 +17,7 @@ from .registry import ToolRegistry
 from .rollback_manager import RollbackError, RollbackManager
 from .schema_validator import SchemaValidator
 from .state_machine import StateMachine
+from .task_work_log import TaskWorkLog
 
 __all__ = [
     "ArtifactStore",
@@ -33,6 +34,7 @@ __all__ = [
     "SchemaValidator",
     "StateMachine",
     "SystemClock",
+    "TaskWorkLog",
     "ToolNotFoundError",
     "ToolValidationError",
 ]
