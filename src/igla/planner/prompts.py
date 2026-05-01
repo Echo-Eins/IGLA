@@ -154,14 +154,23 @@ TOOL_USAGE_EXAMPLES: dict[str, list[dict[str, Any]]] = {
     "read_file": [
         {
             "intent": (
-                "Прочитать конкретный файл, путь которого уже известен "
-                "(например, из find_files)."
+                "Прочитать небольшой файл целиком — путь уже известен из find_files."
             ),
             "input": {"path": "configs/motivation.yaml"},
         },
         {
-            "intent": "Прочитать только верхнюю часть длинного файла.",
-            "input": {"path": "src/igla/planner/planner.py", "max_bytes": 4096},
+            "intent": (
+                "Большой файл: первые 1000 строк. Если file имеет больше 1000 строк, "
+                "ОБЯЗАТЕЛЬНО указывай start_line и end_line иначе будет ошибка FILE_TOO_LARGE."
+            ),
+            "input": {"path": "src/igla/planner/planner.py", "start_line": 0, "end_line": 1000},
+        },
+        {
+            "intent": (
+                "Итеративное чтение: следующий блок после первого (строки 1000–2000). "
+                "Продолжать пока end_of_file=false."
+            ),
+            "input": {"path": "src/igla/planner/planner.py", "start_line": 1000, "end_line": 2000},
         },
     ],
     "ask_user": [

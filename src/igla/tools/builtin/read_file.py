@@ -1,9 +1,19 @@
-"""``read_file`` — workspace-bounded file reader.
+"""``read_file`` — workspace-bounded file reader with line-range support.
 
-Even though the sandbox is not yet in place, we already enforce the basic
-``allowed_paths`` semantics here: a tool MUST refuse paths that escape
-``workspace_root``. This is the seed of the future ``path_allowed`` policy
-predicate.
+The tool reads a text file inside the configured workspace and emits a
+``FileReadReceipt``.  For large files the caller MUST supply an explicit line
+range (``start_line`` / ``end_line``); without a range the tool refuses files
+longer than ``_LINE_LIMIT`` and returns a ``FILE_TOO_LARGE`` error with an
+iterative-read hint so the model knows exactly how to proceed.
+
+Path semantics:
+* Relative paths are resolved against ``workspace_root``.
+* Paths that escape the workspace are rejected (``PATH_OUTSIDE_WORKSPACE``).
+
+Line numbering:
+* ``start_line`` — 0-indexed, inclusive (default 0).
+* ``end_line``   — exclusive end, like Python slicing (default: whole file).
+* ``end_line`` beyond the last line is silently capped at ``total_lines``.
 """
 from __future__ import annotations
 
@@ -22,27 +32,63 @@ from ...protocol.manifest import (
 from ...protocol.result import ToolError, ToolResult
 from ..base import Tool
 
+_LINE_LIMIT = 1000
+
 _INPUT_SCHEMA = {
     "type": "object",
     "additionalProperties": False,
     "required": ["path"],
     "properties": {
         "path": {"type": "string", "minLength": 1},
-        "max_bytes": {"type": "integer", "minimum": 1, "maximum": 10_000_000},
+        "start_line": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "First line to return (0-indexed, inclusive). Default: 0.",
+        },
+        "end_line": {
+            "type": "integer",
+            "minimum": 1,
+            "description": (
+                f"Last line to return (exclusive end, like Python slicing). "
+                f"If omitted and the file has ≤{_LINE_LIMIT} lines the whole file is "
+                f"returned. If omitted and the file is larger the call fails with "
+                f"FILE_TOO_LARGE — use start_line/end_line to read iteratively in "
+                f"chunks (e.g. 0/{_LINE_LIMIT}, then {_LINE_LIMIT}/{_LINE_LIMIT*2}, …)."
+            ),
+        },
     },
 }
 
 _OUTPUT_SCHEMA = {
     "type": "object",
     "additionalProperties": False,
-    "required": ["path", "content", "bytes_read", "sha256", "receipt_id"],
+    "required": [
+        "path",
+        "content",
+        "start_line",
+        "end_line",
+        "total_lines",
+        "end_of_file",
+        "truncated",
+        "sha256",
+        "receipt_id",
+    ],
     "properties": {
         "path": {"type": "string"},
         "content": {"type": "string"},
-        "bytes_read": {"type": "integer", "minimum": 0},
+        "start_line": {"type": "integer", "minimum": 0},
+        "end_line": {"type": "integer", "minimum": 0},
+        "total_lines": {"type": "integer", "minimum": 0},
+        "end_of_file": {
+            "type": "boolean",
+            "description": "True when end_line reached the last line of the file.",
+        },
+        "truncated": {
+            "type": "boolean",
+            "description": "Always False — the tool never silently truncates.",
+        },
         "sha256": {"type": "string"},
         "receipt_id": {"type": "string"},
-        "truncated": {"type": "boolean"},
     },
 }
 
@@ -56,9 +102,10 @@ class ReadFileTool(Tool):
                 namespace="core.fs",
                 version="1.0.0",
                 description=(
-                    "Read a workspace-bounded text file and emit a FileReadReceipt. "
-                    "The path must be inside the configured workspace; relative paths "
-                    "are resolved against the workspace root."
+                    "Read a workspace-bounded text file. "
+                    "For files longer than 1000 lines supply start_line and end_line "
+                    "to read iteratively; omitting the range on a large file returns "
+                    "FILE_TOO_LARGE with the total line count and an iterative-read hint."
                 ),
                 capabilities=["fs.read", "core.read_file"],
                 risk_level="read_only",
@@ -77,7 +124,8 @@ class ReadFileTool(Tool):
 
     def invoke(self, invocation: ToolInvocation) -> ToolResult:
         raw_path = str(invocation.input["path"])
-        max_bytes = int(invocation.input.get("max_bytes", 1_000_000))
+        start_line = int(invocation.input.get("start_line", 0))
+        end_line_req = invocation.input.get("end_line")  # None = caller did not set
 
         target = self._resolve(raw_path)
         if target is None:
@@ -99,7 +147,7 @@ class ReadFileTool(Tool):
                 message=f"not a regular file: {target}",
             )
         try:
-            data = target.read_bytes()
+            raw = target.read_bytes()
         except OSError as exc:
             return _failure(
                 invocation,
@@ -107,21 +155,44 @@ class ReadFileTool(Tool):
                 message=f"failed to read {target}: {exc}",
             )
 
-        truncated = False
-        if len(data) > max_bytes:
-            data = data[:max_bytes]
-            truncated = True
-
         try:
-            content = data.decode("utf-8")
+            text = raw.decode("utf-8")
         except UnicodeDecodeError:
-            content = data.decode("utf-8", errors="replace")
+            text = raw.decode("utf-8", errors="replace")
+
+        all_lines = text.splitlines()
+        total_lines = len(all_lines)
+
+        # No range given on a large file → structured error with iterative hint
+        if end_line_req is None and total_lines > _LINE_LIMIT:
+            return _failure(
+                invocation,
+                code="FILE_TOO_LARGE",
+                message=(
+                    f"file has {total_lines} lines; limit is {_LINE_LIMIT} lines per "
+                    f"call without an explicit range. Read iteratively: call with "
+                    f"start_line=0 end_line={_LINE_LIMIT}, then "
+                    f"start_line={_LINE_LIMIT} end_line={_LINE_LIMIT * 2}, and so on "
+                    f"until end_of_file=true."
+                ),
+            )
+
+        # Resolve the actual slice
+        actual_start = max(0, min(start_line, total_lines))
+        if end_line_req is None:
+            actual_end = total_lines
+        else:
+            actual_end = max(actual_start, min(int(end_line_req), total_lines))
+
+        selected = all_lines[actual_start:actual_end]
+        content = "\n".join(selected) + ("\n" if selected else "")
+        end_of_file = actual_end >= total_lines
 
         receipt = self._receipts.record_file_read(
             task_id=invocation.task_id,
             path=str(target),
             content=content,
-            bytes_read=len(data),
+            bytes_read=len(content.encode("utf-8")),
             step_id=invocation.step_id,
         )
 
@@ -133,10 +204,13 @@ class ReadFileTool(Tool):
             output={
                 "path": str(target),
                 "content": content,
-                "bytes_read": len(data),
+                "start_line": actual_start,
+                "end_line": actual_end,
+                "total_lines": total_lines,
+                "end_of_file": end_of_file,
+                "truncated": False,
                 "sha256": receipt.sha256,
                 "receipt_id": receipt.receipt_id,
-                "truncated": truncated,
             },
         )
 
@@ -165,7 +239,7 @@ def _failure(invocation: ToolInvocation, *, code: str, message: str) -> ToolResu
             kind="FileSystemError",
             code=code,
             message=message,
-            retryable=False,
+            retryable=code not in {"PATH_OUTSIDE_WORKSPACE", "NOT_A_FILE"},
             requires_diagnosis=True,
         ),
     )

@@ -136,9 +136,14 @@ class LMStudioClient:
 def _parse_json_strict(content: str) -> dict[str, Any]:
     """Parse the model's JSON output.
 
-    LM Studio sometimes returns plain text wrapped in code fences (``‍```json
-    ... ```) when the model is not perfectly tuned for structured outputs. We
-    strip a single set of fences if present, then ``json.loads``.
+    Tolerates two common server-side template glitches:
+
+    * Code-fenced output: ``‍```json\n{...}\n``` `` — strips a single fence.
+    * Harmony channel markers leaking through (gpt-oss models): the assistant
+      output looks like ``<|channel|>final <|constrain|>json<|message|>{...}``
+      because LM Studio applied a generic ChatML template instead of the
+      gpt-oss Harmony template. We extract the JSON object from the first ``{``
+      to the matching closing brace.
     """
     text = content.strip()
     if text.startswith("```"):
@@ -152,6 +157,10 @@ def _parse_json_strict(content: str) -> dict[str, Any]:
         if text.endswith("```"):
             text = text[: -len("```")]
         text = text.strip()
+    if "<|" in text and "{" in text:
+        # Harmony-style prefix leaked through. Slice to the first '{' and to the
+        # matching closing '}' (depth-aware so nested objects survive).
+        text = _extract_first_json_object(text)
     try:
         parsed = json.loads(text)
     except json.JSONDecodeError as exc:
@@ -159,6 +168,38 @@ def _parse_json_strict(content: str) -> dict[str, Any]:
     if not isinstance(parsed, dict):
         raise LMStudioError(f"model output JSON is not an object: {content[:200]}")
     return parsed
+
+
+def _extract_first_json_object(text: str) -> str:
+    """Return the substring from the first '{' to its matching '}'.
+
+    Quote-aware so braces inside strings don't fool the depth counter.
+    """
+    start = text.find("{")
+    if start < 0:
+        return text
+    depth = 0
+    in_string = False
+    escape = False
+    for i in range(start, len(text)):
+        ch = text[i]
+        if in_string:
+            if escape:
+                escape = False
+            elif ch == "\\":
+                escape = True
+            elif ch == '"':
+                in_string = False
+            continue
+        if ch == '"':
+            in_string = True
+        elif ch == "{":
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+            if depth == 0:
+                return text[start : i + 1]
+    return text[start:]
 
 
 # ---------------------------------------------------------------------------
