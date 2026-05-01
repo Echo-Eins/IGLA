@@ -29,7 +29,7 @@ from __future__ import annotations
 import json
 from collections.abc import Iterable
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, cast
 
 from ..protocol.policy import PolicyDecision
 from ..protocol.proposal import PlannerProposal
@@ -150,7 +150,10 @@ TOOL_USAGE_EXAMPLES: dict[str, list[dict[str, Any]]] = {
     ],
     "read_file": [
         {
-            "intent": "Прочитать конкретный файл, путь которого уже известен (например, из find_files).",
+            "intent": (
+                "Прочитать конкретный файл, путь которого уже известен "
+                "(например, из find_files)."
+            ),
             "input": {"path": "configs/motivation.yaml"},
         },
         {
@@ -160,13 +163,24 @@ TOOL_USAGE_EXAMPLES: dict[str, list[dict[str, Any]]] = {
     ],
     "ask_user": [
         {
-            "intent": "Использовать ТОЛЬКО когда find_files и search_text вернули пусто И задача без этих данных невыполнима.",
-            "input": {"question": "Не нашёл ни одного файла, подходящего под описание. Уточни путь или проектную папку."},
+            "intent": (
+                "Использовать ТОЛЬКО когда find_files и search_text вернули пусто "
+                "И задача без этих данных невыполнима."
+            ),
+            "input": {
+                "question": (
+                    "Не нашёл ни одного файла, подходящего под описание. "
+                    "Уточни путь или проектную папку."
+                )
+            },
         },
     ],
     "noop_observe": [
         {
-            "intent": "Зафиксировать наблюдение/контрольную точку без побочных эффектов (например, после диагностики неудачи).",
+            "intent": (
+                "Зафиксировать наблюдение/контрольную точку без побочных эффектов "
+                "(например, после диагностики неудачи)."
+            ),
             "input": {"note": "find_files вернул 0 результатов для query=foo"},
         },
     ],
@@ -252,11 +266,10 @@ def build_session_system_message(
     of ``(title, body)`` tuples to inject additional sections (e.g. project
     conventions, future memory recap) without modifying this function.
     """
-    digests = (
-        tools  # type: ignore[assignment]
-        if tools and isinstance(tools[0], ToolDigest)
-        else tools_digest_from_registry_dump(tools)  # type: ignore[arg-type]
-    )
+    if tools and isinstance(tools[0], ToolDigest):
+        digests = cast(list[ToolDigest], tools)
+    else:
+        digests = tools_digest_from_registry_dump(cast(list[dict[str, Any]], tools))
     blocks: list[str] = [
         "ROLE",
         SESSION_ROLE,
@@ -271,7 +284,7 @@ def build_session_system_message(
         SESSION_OUTPUT_GRAMMAR,
         "",
         "TOOLS",
-        _format_tools_block(digests),  # type: ignore[arg-type]
+        _format_tools_block(digests),
     ]
     for title, body in extra_sections or []:
         blocks.extend(["", title.upper(), body])
@@ -429,7 +442,7 @@ def _normalise_schema(node: Any) -> None:
 
 
 def render_event_tail(
-    events: Iterable, *, limit: int = 12, since_index: int | None = None
+    events: Iterable[Any], *, limit: int = 12, since_index: int | None = None
 ) -> list[dict[str, Any]]:
     """Render events for inclusion in the prompt.
 
@@ -453,6 +466,8 @@ def render_event_tail(
         for field in ("status", "tool_name", "message", "rule", "reason_code", "answer"):
             if field in evt.payload and not isinstance(evt.payload[field], (dict, list)):
                 digest[field] = evt.payload[field]
+        if "output" in evt.payload and isinstance(evt.payload["output"], dict):
+            digest["output"] = evt.payload["output"]
         tail.append(digest)
     return tail
 

@@ -36,3 +36,14 @@ Generic read-only actions such as `noop_observe` must not unlock
 clarification. Only real workspace discovery tools (`find_files`,
 `search_text`, `read_file`, or tools with explicit discovery capabilities)
 can make a later clarification legitimate.
+
+## 2026-04-30: Planner must see tool results, not just event keys
+
+A tool invocation is useless to the model if the next prompt only says
+`output_keys`. Discovery tools must publish compact, prompt-safe evidence
+(`count`, `matches`, `relative_path`, snippets) into the event tail. Otherwise
+the model can run `find_files`, still not know what was found, and ask the
+user for a path that the runtime already discovered.
+
+If discovery returns one clear result, user contact must be denied. The next
+valid move is to use the discovered path (`read_file`) or finish the task.

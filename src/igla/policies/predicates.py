@@ -332,6 +332,18 @@ def _discovery_before_clarification(ctx: PredicateContext) -> PredicateOutcome:
     ):
         return PredicateOutcome.allow()
 
+    if _has_unambiguous_discovery_result(ctx):
+        return PredicateOutcome.deny(
+            reason_code="DISCOVERY_RESULT_AVAILABLE",
+            message=(
+                "A workspace discovery tool already returned an unambiguous result for this "
+                "task. Use that result with read_file, todo_complete, or declare_task_done "
+                "instead of asking the user."
+            ),
+            rule_id="discovery_before_clarification",
+            allowed_next=("tool:read_file", "todo_complete", "declare_task_done"),
+        )
+
     if _has_completed_discovery_tool(ctx):
         return PredicateOutcome.allow()
 
@@ -381,6 +393,29 @@ def _has_completed_discovery_tool(ctx: PredicateContext) -> bool:
             # Tool gone from registry; count only explicit discovery tool names.
             return str(tool_name) in _DISCOVERY_TOOL_NAMES
         if _is_discovery_manifest(manifest):
+            return True
+    return False
+
+
+def _has_unambiguous_discovery_result(ctx: PredicateContext) -> bool:
+    for evt in ctx.kernel.events.list_by_task(ctx.action.task_id):
+        if evt.kind is not EventKind.TOOL_INVOCATION_COMPLETED:
+            continue
+        output = evt.payload.get("output")
+        if not isinstance(output, dict):
+            continue
+        tool_name = evt.payload.get("tool_name")
+        if tool_name == "find_files":
+            count = output.get("count")
+            matches = output.get("matches")
+            if count == 1 or (isinstance(matches, list) and len(matches) == 1):
+                return True
+        if tool_name == "search_text":
+            count = output.get("count")
+            matches = output.get("matches")
+            if count == 1 or (isinstance(matches, list) and len(matches) == 1):
+                return True
+        if tool_name == "read_file" and output.get("path"):
             return True
     return False
 

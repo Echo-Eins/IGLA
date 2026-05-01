@@ -23,6 +23,7 @@ REPL renders to the user.
 from __future__ import annotations
 
 import json
+from contextlib import suppress
 from dataclasses import dataclass
 from typing import Any
 
@@ -30,6 +31,8 @@ from ..config import IglaSettings
 from ..ids import prefixed_id
 from ..kernel.kernel import Kernel
 from ..motivation.cycle import MotivationCycle
+from ..motivation.effects import EFFECTS as _EFFECTS
+from ..motivation.effects import EffectContext as _EffCtx
 from ..policies.engine import PolicyEngine
 from ..protocol.event import EventKind
 from ..protocol.invocation import (
@@ -37,7 +40,12 @@ from ..protocol.invocation import (
     ToolInvocation,
     ToolRef,
 )
-from ..protocol.policy import ActionRequest, PolicyDecision, PolicyDecisionKind
+from ..protocol.policy import (
+    ActionRequest,
+    PolicyDecision,
+    PolicyDecisionKind,
+    PolicyRejection,
+)
 from ..protocol.proposal import (
     AskUserClarificationProposal,
     DeclareTaskDoneProposal,
@@ -167,10 +175,15 @@ class Planner:
                 # counter so an endlessly-broken model still aborts.
                 synthetic = self._malformed_to_decision(parse_exc, task)
                 last_decision = synthetic
+                rejection = synthetic.rejection
+                if rejection is None:
+                    raise PlannerError(
+                        "malformed proposal decision has no rejection"
+                    ) from parse_exc
                 rejections = kernel.state.record_rejection(
                     task.task_id,
-                    reason_code=synthetic.rejection.reason_code,
-                    message=synthetic.rejection.message,
+                    reason_code=rejection.reason_code,
+                    message=rejection.message,
                 )
                 kernel.events.append(
                     kind=EventKind.POLICY_REJECTION,
@@ -193,19 +206,20 @@ class Planner:
             last_decision = decision
 
             if decision.is_deny:
+                rejection = decision.rejection
                 rejections = kernel.state.record_rejection(
                     task.task_id,
-                    reason_code=(decision.rejection.reason_code if decision.rejection else "DENIED"),
-                    message=(decision.rejection.message if decision.rejection else "policy deny"),
+                    reason_code=rejection.reason_code if rejection else "DENIED",
+                    message=rejection.message if rejection else "policy deny",
                 )
                 kernel.events.append(
                     kind=EventKind.POLICY_REJECTION,
                     actor="policy",
                     task_id=task.task_id,
                     payload={
-                        "reason_code": decision.rejection.reason_code if decision.rejection else None,
-                        "message": decision.rejection.message if decision.rejection else None,
-                        "rule_id": decision.rejection.rule_id if decision.rejection else None,
+                        "reason_code": rejection.reason_code if rejection else None,
+                        "message": rejection.message if rejection else None,
+                        "rule_id": rejection.rule_id if rejection else None,
                         "action_kind": decision.action.kind,
                         "tool_name": decision.action.tool_name,
                     },
@@ -269,7 +283,7 @@ class Planner:
         new_events = render_event_tail(events, since_index=since)
 
         # Session-level system message: rebuilt only when the registry changes.
-        tools_dump = [
+        tools_dump: list[dict[str, Any]] = [
             {
                 "name": m.name,
                 "version": m.version,
@@ -280,7 +294,9 @@ class Planner:
             }
             for m in kernel.registry.list_tools()
         ]
-        signature = tuple(sorted((t["name"], t["version"]) for t in tools_dump))
+        signature: tuple[tuple[str, str], ...] = tuple(
+            sorted((str(t["name"]), str(t["version"])) for t in tools_dump)
+        )
         if (
             self._cached_session_msg is None
             or self._cached_session_tools_signature != signature
@@ -358,12 +374,10 @@ class Planner:
 
     @staticmethod
     def _malformed_to_decision(
-        exc: "_MalformedProposal",
+        exc: _MalformedProposal,
         task: TaskSpec,
     ) -> PolicyDecision:
         """Synthesise a PolicyDecision so the next prompt sees the parse error."""
-        from ..protocol.policy import PolicyRejection
-
         action = ActionRequest(
             kind="tool_invocation",
             actor="planner",
@@ -422,7 +436,6 @@ class Planner:
         task: TaskSpec,
         todo: TodoTree,
     ) -> object:
-        kernel = self._kernel
         root = proposal.root
 
         if isinstance(root, ToolInvocationProposal):
@@ -483,17 +496,21 @@ class Planner:
             if result.status == "success"
             else EventKind.TOOL_INVOCATION_FAILED
         )
+        event_payload: dict[str, Any] = {
+            "tool_name": proposal.tool_name,
+            "status": result.status,
+            "error_code": result.error.code if result.error else None,
+            "output_keys": sorted(result.output.keys()),
+        }
+        compact_output = _compact_tool_output(proposal.tool_name, result.output)
+        if compact_output:
+            event_payload["output"] = compact_output
         evt = kernel.events.append(
             kind=ev_kind,
             actor=f"tool:{proposal.tool_name}",
             task_id=task.task_id,
             step_id=step_id,
-            payload={
-                "tool_name": proposal.tool_name,
-                "status": result.status,
-                "error_code": result.error.code if result.error else None,
-                "output_keys": sorted(result.output.keys()),
-            },
+            payload=event_payload,
         )
         if result.error is not None:
             kernel.state.mark_failure(task.task_id, result.error.code)
@@ -543,9 +560,6 @@ class Planner:
         # Pause via the same effect used by the ``ask_user`` tool path so
         # both routes preserve the pre-clarification operational state
         # (e.g. FAILURE_DIAGNOSIS_REQUIRED).
-        from ..motivation.effects import EFFECTS as _EFFECTS
-        from ..motivation.effects import EffectContext as _EffCtx
-
         state = kernel.state.ensure_task(task.task_id)
         _EFFECTS["pause_for_clarification"](
             _EffCtx(
@@ -638,10 +652,8 @@ class Planner:
         self._motivation.dispatch(evt)
         # Defensive: the motivation rule sets mode to TASK_DONE; ensure it
         # stuck even if rules are turned off.
-        try:
+        with suppress(Exception):
             kernel.state.transition_mode(task.task_id, RuntimeMode.TASK_DONE)
-        except Exception:
-            pass
 
     # --- helpers -------------------------------------------------------
 
@@ -653,10 +665,8 @@ class Planner:
             payload={"reason": reason},
         )
         self._motivation.dispatch(evt)
-        try:
+        with suppress(Exception):
             self._kernel.state.transition_mode(task.task_id, RuntimeMode.BLOCKED)
-        except Exception:
-            pass
         state = self._kernel.state.get_state(task.task_id)
         return PlannerOutcome(
             task_id=task.task_id,
@@ -722,6 +732,62 @@ def _summary_of(proposal: PlannerProposal) -> str | None:
     if isinstance(root, DeclareTaskDoneProposal):
         return root.summary
     return None
+
+
+def _compact_tool_output(tool_name: str, output: dict[str, Any]) -> dict[str, Any]:
+    if not output:
+        return {}
+    if tool_name == "find_files":
+        matches = [
+            {
+                "relative_path": match.get("relative_path"),
+                "size_bytes": match.get("size_bytes"),
+            }
+            for match in list(output.get("matches") or [])[:10]
+            if isinstance(match, dict)
+        ]
+        return {
+            "count": output.get("count", len(matches)),
+            "truncated": bool(output.get("truncated", False)),
+            "matches": matches,
+        }
+    if tool_name == "search_text":
+        matches = [
+            {
+                "relative_path": match.get("relative_path"),
+                "line_number": match.get("line_number"),
+                "line": _truncate_text(str(match.get("line", "")), 300),
+            }
+            for match in list(output.get("matches") or [])[:10]
+            if isinstance(match, dict)
+        ]
+        return {
+            "count": output.get("count", len(matches)),
+            "truncated": bool(output.get("truncated", False)),
+            "matches": matches,
+            "searched_files": output.get("searched_files"),
+            "skipped_files": output.get("skipped_files"),
+        }
+    if tool_name == "read_file":
+        content = str(output.get("content", ""))
+        return {
+            "path": output.get("path"),
+            "bytes_read": output.get("bytes_read"),
+            "truncated": bool(output.get("truncated", False)) or len(content) > 4000,
+            "content_excerpt": _truncate_text(content, 4000),
+            "receipt_id": output.get("receipt_id"),
+        }
+    return {
+        key: _truncate_text(value, 500) if isinstance(value, str) else value
+        for key, value in output.items()
+        if isinstance(value, (str, int, float, bool)) or value is None
+    }
+
+
+def _truncate_text(text: str, max_chars: int) -> str:
+    if len(text) <= max_chars:
+        return text
+    return text[: max_chars - 3] + "..."
 
 
 _TASK_DONE = object()

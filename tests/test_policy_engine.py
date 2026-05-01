@@ -226,3 +226,36 @@ def test_clarification_allowed_after_discovery_tool(make_settings) -> None:
     )
     decision = engine.check(action, kernel=kernel)
     assert decision.decision is PolicyDecisionKind.ALLOW
+
+
+def test_clarification_denied_after_unambiguous_discovery_result(make_settings) -> None:
+    engine, kernel = _build(make_settings)
+    kernel.registry.register(FindFilesTool(workspace_root="/tmp"))
+    kernel.state.ensure_task("t1")
+    kernel.state.set_allowed_actions("t1", ["ask_user_clarification", "tool_invocation"])
+    kernel.events.append(
+        kind=EventKind.TOOL_INVOCATION_COMPLETED,
+        actor="tool:find_files",
+        task_id="t1",
+        payload={
+            "tool_name": "find_files",
+            "status": "success",
+            "output": {
+                "count": 1,
+                "truncated": False,
+                "matches": [{"relative_path": "AGENTS.md", "size_bytes": 10}],
+            },
+        },
+    )
+    action = ActionRequest(
+        kind="ask_user_clarification",
+        actor="planner",
+        task_id="t1",
+        input={"question": "where is AGENTS.md?"},
+        reason="should use result",
+    )
+
+    decision = engine.check(action, kernel=kernel)
+
+    assert decision.is_deny
+    assert decision.rejection.reason_code == "DISCOVERY_RESULT_AVAILABLE"

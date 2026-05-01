@@ -1,6 +1,7 @@
 """End-to-end tests of the planner loop using the OfflineCannedClient."""
 from __future__ import annotations
 
+import json
 from datetime import UTC, datetime
 
 from conftest import build_runtime  # type: ignore[import-not-found]
@@ -221,6 +222,83 @@ def test_ask_user_tool_is_rejected_before_discovery(make_settings) -> None:
         if e.kind is EventKind.TOOL_INVOCATION_STARTED
     ]
     assert started_tools == ["find_files"]
+
+
+def test_discovery_output_is_visible_to_next_planner_turn(make_settings) -> None:
+    settings = make_settings()
+    (settings.paths.workspace / "AGENTS.md").write_text("# Instructions\n", encoding="utf-8")
+    canned = [
+        {
+            "action": "tool_invocation",
+            "tool_name": "find_files",
+            "tool_version": "1.0.0",
+            "input": {"query": "AGENTS.md", "max_results": 20},
+            "reason": "search locally first",
+        },
+        {
+            "action": "declare_task_done",
+            "summary": "found AGENTS.md",
+            "reason": "result is visible",
+        },
+    ]
+    planner, kernel, _, _, llm = build_runtime(
+        settings,
+        canned_responses=canned,
+        clock=StepClock(datetime(2026, 4, 29, tzinfo=UTC), step_seconds=0.1),
+    )
+    task = _new_task("найди файл AGENTS.md", kernel)
+    todo = TodoTree(task.task_id, kernel.clock)
+    todo.create_root(title="find")
+
+    outcome = planner.run_task(task, todo)
+
+    assert outcome.status is TaskStatus.DONE
+    second_turn = json.loads(llm.sent_messages[1][2].content)
+    rendered = json.dumps(second_turn["new_events_since_last_turn"], ensure_ascii=False)
+    assert "AGENTS.md" in rendered
+    assert "matches" in rendered
+
+
+def test_question_after_unambiguous_discovery_is_rejected(make_settings) -> None:
+    settings = make_settings()
+    (settings.paths.workspace / "AGENTS.md").write_text("# Instructions\n", encoding="utf-8")
+    canned = [
+        {
+            "action": "tool_invocation",
+            "tool_name": "find_files",
+            "tool_version": "1.0.0",
+            "input": {"query": "AGENTS.md", "max_results": 20},
+            "reason": "search locally first",
+        },
+        {
+            "action": "ask_user_clarification",
+            "question": "where is AGENTS.md?",
+            "reason": "bad model behavior despite result",
+        },
+        {
+            "action": "declare_task_done",
+            "summary": "found AGENTS.md",
+            "reason": "use discovery result",
+        },
+    ]
+    planner, kernel, _, _, _ = build_runtime(
+        settings,
+        canned_responses=canned,
+        clock=StepClock(datetime(2026, 4, 29, tzinfo=UTC), step_seconds=0.1),
+    )
+    task = _new_task("найди файл AGENTS.md", kernel)
+    todo = TodoTree(task.task_id, kernel.clock)
+    todo.create_root(title="find")
+
+    outcome = planner.run_task(task, todo)
+
+    assert outcome.status is TaskStatus.DONE
+    rejections = [
+        e
+        for e in kernel.events.list_by_task(task.task_id)
+        if e.kind is EventKind.POLICY_REJECTION
+    ]
+    assert [e.payload["reason_code"] for e in rejections] == ["DISCOVERY_RESULT_AVAILABLE"]
 
 
 def test_unknown_tool_is_rejected_and_planner_retries(make_settings) -> None:

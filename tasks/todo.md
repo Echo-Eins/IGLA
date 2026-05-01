@@ -82,3 +82,20 @@
 - Clarification unlock now requires a real workspace discovery tool, not any read-only tool.
 - Added regressions for bare question-shaped model output and direct `ask_user` proposals.
 - Verified with `pytest tests/`: 85 passed.
+
+# Bugfix: expose tool outputs to planner before clarification
+
+- [x] Capture root cause: planner sees `output_keys`, not found paths/content.
+- [x] Store compact read-only tool output in tool completion events.
+- [x] Include compact tool output in planner event tail.
+- [x] Deny user questions when discovery already produced an unambiguous result.
+- [x] Add regressions for `AGENTS.md` discovery result visibility and no-question behavior.
+- [x] Verify tests and document review.
+
+## Review
+
+- Tool completion events now store compact output for `find_files`, `search_text`, and `read_file`.
+- Planner event tail now includes compact tool output, so the next LLM turn sees found paths/content excerpts.
+- Policy now denies user questions when discovery already produced an unambiguous result.
+- Added regressions proving `AGENTS.md` appears in the next planner prompt and a question after that result is rejected.
+- Verified with `pytest tests/`: 88 passed.
