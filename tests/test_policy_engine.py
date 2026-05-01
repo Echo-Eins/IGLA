@@ -1,21 +1,28 @@
 """Policy engine + constitution predicates."""
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from igla.kernel.clock import StepClock
 from igla.kernel.kernel import Kernel
 from igla.policies.constitution import load_constitution
 from igla.policies.engine import PolicyContext, PolicyEngine
+from igla.protocol.event import EventKind
 from igla.protocol.policy import ActionRequest, PolicyDecisionKind
 from igla.protocol.runtime import RuntimeMode
+from igla.tools.builtin.ask_user import AskUserTool
 from igla.tools.builtin.noop_observe import NoopObserveTool
 from igla.tools.builtin.search import FindFilesTool
 
 
+class _DummyAsk:
+    def ask(self, *, question: str, prompt_label: str | None = None) -> str:
+        return ""
+
+
 def _build(make_settings):
     settings = make_settings()
-    kernel = Kernel(settings, clock=StepClock(start=datetime(2026, 4, 29, tzinfo=timezone.utc)))
+    kernel = Kernel(settings, clock=StepClock(start=datetime(2026, 4, 29, tzinfo=UTC)))
     kernel.registry.register(NoopObserveTool())
     constitution = load_constitution(settings.paths.constitution_file)
     engine = PolicyEngine(constitution, PolicyContext())
@@ -148,10 +155,57 @@ def test_clarification_blocked_before_any_discovery(make_settings) -> None:
     assert decision.rejection.reason_code == "MUST_DISCOVER_FIRST"
 
 
-def test_clarification_allowed_after_readonly_tool(make_settings) -> None:
-    """A completed read-only tool invocation unlocks ask_user_clarification."""
-    from igla.protocol.event import EventKind
+def test_ask_user_tool_blocked_before_any_discovery(make_settings) -> None:
+    """Direct ask_user tool invocations must not bypass discovery policy."""
+    engine, kernel = _build(make_settings)
+    kernel.registry.register(AskUserTool(channel=_DummyAsk()))
+    kernel.registry.register(FindFilesTool(workspace_root="/tmp"))
+    kernel.state.ensure_task("t1")
+    kernel.state.set_allowed_actions("t1", ["tool_invocation"])
+    action = ActionRequest(
+        kind="tool_invocation",
+        actor="planner",
+        task_id="t1",
+        tool_name="ask_user",
+        tool_version="1.0.0",
+        input={"question": "where is AGENTS.md?"},
+        reason="ask instead of searching",
+    )
 
+    decision = engine.check(action, kernel=kernel)
+
+    assert decision.is_deny
+    assert decision.rejection.reason_code == "MUST_DISCOVER_FIRST"
+
+
+def test_noop_observe_does_not_unlock_clarification(make_settings) -> None:
+    """Only real discovery tools unlock user clarification."""
+    engine, kernel = _build(make_settings)
+    kernel.registry.register(FindFilesTool(workspace_root="/tmp"))
+    kernel.state.ensure_task("t1")
+    kernel.state.set_allowed_actions("t1", ["ask_user_clarification", "tool_invocation"])
+    kernel.events.append(
+        kind=EventKind.TOOL_INVOCATION_COMPLETED,
+        actor="tool:noop_observe",
+        task_id="t1",
+        payload={"tool_name": "noop_observe", "status": "success"},
+    )
+    action = ActionRequest(
+        kind="ask_user_clarification",
+        actor="planner",
+        task_id="t1",
+        input={"question": "where is it?"},
+        reason="noop is not discovery",
+    )
+
+    decision = engine.check(action, kernel=kernel)
+
+    assert decision.is_deny
+    assert decision.rejection.reason_code == "MUST_DISCOVER_FIRST"
+
+
+def test_clarification_allowed_after_discovery_tool(make_settings) -> None:
+    """A completed discovery tool invocation unlocks ask_user_clarification."""
     engine, kernel = _build(make_settings)
     kernel.registry.register(FindFilesTool(workspace_root="/tmp"))
     kernel.state.ensure_task("t1")

@@ -66,3 +66,19 @@
 - Registry now accepts `v1.0.0` / `V1.0.0` references for tools registered as `1.0.0`.
 - Documented the new command in `docs/ENGINE.md`.
 - Verified with `pytest tests/`: 81 passed.
+
+# Bugfix: block premature user questions through all channels
+
+- [x] Capture root cause: `ask_user` tool can bypass `ask_user_clarification` policy.
+- [x] Gate both `ask_user_clarification` and tool `ask_user` behind discovery.
+- [x] Restrict discovery unlock to real workspace discovery tools, not generic read-only tools.
+- [x] Add planner regressions for malformed `question` output and direct `ask_user`.
+- [x] Verify tests and document review.
+
+## Review
+
+- Closed the policy bypass where `tool:ask_user` could contact the user before discovery.
+- `discovery_before_clarification` now covers both `ask_user_clarification` and direct `ask_user` tool invocations.
+- Clarification unlock now requires a real workspace discovery tool, not any read-only tool.
+- Added regressions for bare question-shaped model output and direct `ask_user` proposals.
+- Verified with `pytest tests/`: 85 passed.

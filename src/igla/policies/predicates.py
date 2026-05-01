@@ -26,6 +26,7 @@ from ..protocol.runtime import RuntimeMode
 if TYPE_CHECKING:  # pragma: no cover
     from ..kernel.kernel import Kernel
     from ..kernel.state_machine import TaskRuntimeState
+    from ..protocol.manifest import ToolManifest
     from ..todo.tree import TodoTree
 
 
@@ -37,9 +38,9 @@ class PredicateContext:
     """
 
     action: ActionRequest
-    task_state: "TaskRuntimeState"
-    kernel: "Kernel"
-    todo_tree: "TodoTree | None" = None
+    task_state: TaskRuntimeState
+    kernel: Kernel
+    todo_tree: TodoTree | None = None
     iteration_limit: int = 60
     clarification_depth_limit: int = 4
     consecutive_rejections_limit: int = 5
@@ -53,7 +54,7 @@ class PredicateOutcome:
     forbidden_next: tuple[str, ...] = ()
 
     @classmethod
-    def allow(cls) -> "PredicateOutcome":
+    def allow(cls) -> PredicateOutcome:
         return cls(decision=PolicyDecisionKind.ALLOW)
 
     @classmethod
@@ -67,7 +68,7 @@ class PredicateOutcome:
         hints: Iterable[str] = (),
         allowed_next: Iterable[str] = (),
         forbidden_next: Iterable[str] = (),
-    ) -> "PredicateOutcome":
+    ) -> PredicateOutcome:
         return cls(
             decision=PolicyDecisionKind.DENY,
             rejection=PolicyRejection(
@@ -86,6 +87,20 @@ PredicateFn = Callable[[PredicateContext], PredicateOutcome]
 
 
 PREDICATES: dict[str, PredicateFn] = {}
+
+_DISCOVERY_TOOL_NAMES = frozenset({"find_files", "search_text", "read_file"})
+_DISCOVERY_CAPABILITIES = frozenset(
+    {
+        "fs.find",
+        "fs.discover",
+        "fs.grep",
+        "fs.search_text",
+        "fs.read",
+        "core.find_files",
+        "core.search_text",
+        "core.read_file",
+    }
+)
 
 
 def register_predicate(name: str, fn: PredicateFn) -> None:
@@ -293,21 +308,21 @@ def _clarification_depth(ctx: PredicateContext) -> PredicateOutcome:
 def _discovery_before_clarification(ctx: PredicateContext) -> PredicateOutcome:
     """IGLA must act, not ask.
 
-    Reject ``ask_user_clarification`` proposals unless one of these is true:
+    Reject every user-contact proposal unless one of these is true:
 
     * the runtime is already in ``NEEDS_USER_CLARIFICATION`` (we are in an
       active back-and-forth — continuation is fine);
     * the runtime is in ``FAILURE_DIAGNOSIS_REQUIRED`` (recoverable failure
       where asking the user is a legitimate fallback);
-    * at least one *read-only* discovery tool has already been invoked for
-      this task (find_files / search_text / read_file / any tool whose
-      manifest declares ``risk_level=read_only`` and ``side_effects=False``).
+    * at least one real workspace discovery tool has already been invoked for
+      this task (find_files / search_text / read_file or a future tool with a
+      discovery capability).
 
     The model is told via the rejection message exactly what to do next, so
     the next turn's prompt carries concrete, actionable hints rather than a
     naked ``ACTION_NOT_IN_ALLOWED_LIST``.
     """
-    if ctx.action.kind != "ask_user_clarification":
+    if not _is_user_contact_action(ctx.action):
         return PredicateOutcome.allow()
 
     state = ctx.task_state
@@ -317,7 +332,7 @@ def _discovery_before_clarification(ctx: PredicateContext) -> PredicateOutcome:
     ):
         return PredicateOutcome.allow()
 
-    if _has_completed_readonly_tool(ctx):
+    if _has_completed_discovery_tool(ctx):
         return PredicateOutcome.allow()
 
     discovery_hints = _discovery_tool_hints(ctx)
@@ -332,12 +347,24 @@ def _discovery_before_clarification(ctx: PredicateContext) -> PredicateOutcome:
         ),
         rule_id="discovery_before_clarification",
         hints=discovery_hints,
-        allowed_next=("tool_invocation", "todo_branch", "todo_complete"),
+        allowed_next=(
+            "tool:find_files",
+            "tool:search_text",
+            "tool:read_file",
+            "todo_branch",
+            "todo_complete",
+        ),
     )
 
 
-def _has_completed_readonly_tool(ctx: PredicateContext) -> bool:
-    """True if any read-only tool invocation finished for this task."""
+def _is_user_contact_action(action: ActionRequest) -> bool:
+    if action.kind == "ask_user_clarification":
+        return True
+    return action.kind == "tool_invocation" and action.tool_name == "ask_user"
+
+
+def _has_completed_discovery_tool(ctx: PredicateContext) -> bool:
+    """True if any workspace discovery tool invocation finished for this task."""
     registry = ctx.kernel.registry
     for evt in ctx.kernel.events.list_by_task(ctx.action.task_id):
         if evt.kind not in (
@@ -351,9 +378,9 @@ def _has_completed_readonly_tool(ctx: PredicateContext) -> bool:
         try:
             manifest = registry.get(tool_name)
         except Exception:
-            # Tool gone from registry — still counts as a discovery attempt.
-            return True
-        if manifest.risk_level == "read_only" and not manifest.side_effects:
+            # Tool gone from registry; count only explicit discovery tool names.
+            return str(tool_name) in _DISCOVERY_TOOL_NAMES
+        if _is_discovery_manifest(manifest):
             return True
     return False
 
@@ -361,15 +388,19 @@ def _has_completed_readonly_tool(ctx: PredicateContext) -> bool:
 def _discovery_tool_hints(ctx: PredicateContext) -> tuple[str, ...]:
     names: list[str] = []
     for manifest in ctx.kernel.registry.list_tools():
-        if manifest.name == "ask_user":
-            continue
-        if manifest.risk_level == "read_only" and not manifest.side_effects:
+        if _is_discovery_manifest(manifest):
             names.append(manifest.name)
     if not names:
         return ()
     return (
-        "Доступные read-only tools для автономного поиска: " + ", ".join(sorted(names)),
+        "Available workspace discovery tools: " + ", ".join(sorted(names)),
     )
+
+
+def _is_discovery_manifest(manifest: ToolManifest) -> bool:
+    if manifest.name in _DISCOVERY_TOOL_NAMES:
+        return True
+    return bool(_DISCOVERY_CAPABILITIES.intersection(manifest.capabilities))
 
 
 def _todo_node_exists(ctx: PredicateContext) -> PredicateOutcome:

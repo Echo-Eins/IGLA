@@ -1,12 +1,14 @@
 """End-to-end tests of the planner loop using the OfflineCannedClient."""
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from conftest import build_runtime  # type: ignore[import-not-found]
 
 from igla.ids import prefixed_id
 from igla.kernel.clock import StepClock
+from igla.motivation.effects import EFFECTS as _EFFECTS
+from igla.motivation.effects import EffectContext as _EffCtx
 from igla.protocol.event import EventKind
 from igla.protocol.runtime import RuntimeMode
 from igla.protocol.task import TaskSpec, TaskStatus
@@ -34,7 +36,7 @@ def test_declare_task_done_immediately(make_settings) -> None:
     ]
     planner, kernel, store, _, _ = build_runtime(
         settings, canned_responses=canned,
-        clock=StepClock(datetime(2026, 4, 29, tzinfo=timezone.utc), step_seconds=0.1),
+        clock=StepClock(datetime(2026, 4, 29, tzinfo=UTC), step_seconds=0.1),
     )
     task = _new_task("hello", kernel)
     todo = TodoTree(task.task_id, kernel.clock)
@@ -71,7 +73,7 @@ def test_branch_then_complete_then_done(make_settings) -> None:
     ]
     planner, kernel, _, _, _ = build_runtime(
         settings, canned_responses=canned,
-        clock=StepClock(datetime(2026, 4, 29, tzinfo=timezone.utc), step_seconds=0.1),
+        clock=StepClock(datetime(2026, 4, 29, tzinfo=UTC), step_seconds=0.1),
     )
     task = _new_task("do x", kernel)
     todo = TodoTree(task.task_id, kernel.clock)
@@ -117,7 +119,7 @@ def test_ask_user_clarification_pauses_loop(make_settings) -> None:
     ]
     planner, kernel, _, _, _ = build_runtime(
         settings, canned_responses=canned,
-        clock=StepClock(datetime(2026, 4, 29, tzinfo=timezone.utc), step_seconds=0.1),
+        clock=StepClock(datetime(2026, 4, 29, tzinfo=UTC), step_seconds=0.1),
     )
     task = _new_task("backup", kernel)
     todo = TodoTree(task.task_id, kernel.clock)
@@ -128,6 +130,97 @@ def test_ask_user_clarification_pauses_loop(make_settings) -> None:
     # Resume with user reply.
     outcome = planner.handle_user_input(task=task, todo=todo, text="/tmp")
     assert outcome.status is TaskStatus.DONE
+
+
+def test_malformed_question_is_rejected_before_discovery(make_settings) -> None:
+    """A bare question-shaped model output must not reach the user on turn 1."""
+    settings = make_settings()
+    canned = [
+        {
+            "reason": "ask instead of searching",
+            "question": "where is AGENTS.md?",
+        },
+        {
+            "action": "tool_invocation",
+            "tool_name": "find_files",
+            "tool_version": "1.0.0",
+            "input": {"query": "AGENTS.md", "max_results": 20},
+            "reason": "search locally first",
+        },
+        {
+            "action": "declare_task_done",
+            "summary": "searched",
+            "reason": "regression complete",
+        },
+    ]
+    planner, kernel, _, _, _ = build_runtime(
+        settings,
+        canned_responses=canned,
+        clock=StepClock(datetime(2026, 4, 29, tzinfo=UTC), step_seconds=0.1),
+    )
+    task = _new_task("найди файл AGENTS.md", kernel)
+    todo = TodoTree(task.task_id, kernel.clock)
+    todo.create_root(title="find")
+
+    outcome = planner.run_task(task, todo)
+
+    assert outcome.status is TaskStatus.DONE
+    rejections = [
+        e
+        for e in kernel.events.list_by_task(task.task_id)
+        if e.kind is EventKind.POLICY_REJECTION
+    ]
+    assert [e.payload["reason_code"] for e in rejections] == ["MUST_DISCOVER_FIRST"]
+    completed_tools = [
+        e.payload["tool_name"]
+        for e in kernel.events.list_by_task(task.task_id)
+        if e.kind is EventKind.TOOL_INVOCATION_COMPLETED
+    ]
+    assert completed_tools == ["find_files"]
+
+
+def test_ask_user_tool_is_rejected_before_discovery(make_settings) -> None:
+    """The tool path must not bypass the clarification policy."""
+    settings = make_settings()
+    canned = [
+        {
+            "action": "tool_invocation",
+            "tool_name": "ask_user",
+            "tool_version": "1.0.0",
+            "input": {"question": "where is AGENTS.md?"},
+            "reason": "ask instead of searching",
+        },
+        {
+            "action": "tool_invocation",
+            "tool_name": "find_files",
+            "tool_version": "1.0.0",
+            "input": {"query": "AGENTS.md", "max_results": 20},
+            "reason": "search locally first",
+        },
+        {
+            "action": "declare_task_done",
+            "summary": "searched",
+            "reason": "regression complete",
+        },
+    ]
+    planner, kernel, _, _, _ = build_runtime(
+        settings,
+        canned_responses=canned,
+        clock=StepClock(datetime(2026, 4, 29, tzinfo=UTC), step_seconds=0.1),
+    )
+    task = _new_task("найди файл AGENTS.md", kernel)
+    todo = TodoTree(task.task_id, kernel.clock)
+    todo.create_root(title="find")
+
+    outcome = planner.run_task(task, todo)
+
+    assert outcome.status is TaskStatus.DONE
+    started_tools = [
+        e.payload["tool_name"]
+        for e in kernel.events.list_by_task(task.task_id)
+        if e.kind is EventKind.TOOL_INVOCATION_STARTED
+    ]
+    assert started_tools == ["find_files"]
 
 
 def test_unknown_tool_is_rejected_and_planner_retries(make_settings) -> None:
@@ -149,7 +242,7 @@ def test_unknown_tool_is_rejected_and_planner_retries(make_settings) -> None:
     ]
     planner, kernel, _, _, _ = build_runtime(
         settings, canned_responses=canned,
-        clock=StepClock(datetime(2026, 4, 29, tzinfo=timezone.utc), step_seconds=0.1),
+        clock=StepClock(datetime(2026, 4, 29, tzinfo=UTC), step_seconds=0.1),
     )
     task = _new_task("x", kernel)
     todo = TodoTree(task.task_id, kernel.clock)
@@ -187,7 +280,7 @@ def test_failed_tool_enters_diagnosis_and_persists_through_clarification(
     planner, kernel, _, _, _ = build_runtime(
         settings,
         canned_responses=canned,
-        clock=StepClock(datetime(2026, 4, 29, tzinfo=timezone.utc), step_seconds=0.1),
+        clock=StepClock(datetime(2026, 4, 29, tzinfo=UTC), step_seconds=0.1),
     )
     task = _new_task("inspect file", kernel)
     todo = TodoTree(task.task_id, kernel.clock)
@@ -212,9 +305,6 @@ def test_failed_tool_enters_diagnosis_and_persists_through_clarification(
     assert "declare_task_done" in state.pre_pause_forbidden
 
     # Simulate the resume effect explicitly (no further canned responses).
-    from igla.motivation.effects import EFFECTS as _EFFECTS
-    from igla.motivation.effects import EffectContext as _EffCtx
-
     evt = kernel.events.append(
         kind=EventKind.USER_INPUT_RECEIVED,
         actor="user",
@@ -259,7 +349,7 @@ def test_open_file_flow_can_discover_then_read(make_settings) -> None:
     planner, kernel, _, _, _ = build_runtime(
         settings,
         canned_responses=canned,
-        clock=StepClock(datetime(2026, 4, 29, tzinfo=timezone.utc), step_seconds=0.1),
+        clock=StepClock(datetime(2026, 4, 29, tzinfo=UTC), step_seconds=0.1),
     )
     task = _new_task("Открой файл 00-review.md", kernel)
     todo = TodoTree(task.task_id, kernel.clock)
@@ -291,7 +381,7 @@ def test_policy_rejection_loops_until_max(make_settings) -> None:
     ]
     planner, kernel, _, _, _ = build_runtime(
         settings, canned_responses=canned,
-        clock=StepClock(datetime(2026, 4, 29, tzinfo=timezone.utc), step_seconds=0.1),
+        clock=StepClock(datetime(2026, 4, 29, tzinfo=UTC), step_seconds=0.1),
     )
     task = _new_task("x", kernel)
     todo = TodoTree(task.task_id, kernel.clock)

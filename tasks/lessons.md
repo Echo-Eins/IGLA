@@ -24,3 +24,15 @@ manual filesystem cleanup to recover the runtime.
 Tool version references from local models may include a harmless leading `v`
 (`v1.0.0`). Registry lookup should normalize such references at the boundary
 instead of turning an existing tool into `UNKNOWN_TOOL`.
+
+## 2026-04-30: User-contact gates must cover every channel
+
+Autonomy rules cannot protect only `ask_user_clarification`. Any direct
+user-contact tool, especially `tool:ask_user`, must pass through the same
+policy gate. Otherwise the model can bypass the intended architecture and
+ask malformed questions before local discovery.
+
+Generic read-only actions such as `noop_observe` must not unlock
+clarification. Only real workspace discovery tools (`find_files`,
+`search_text`, `read_file`, or tools with explicit discovery capabilities)
+can make a later clarification legitimate.
