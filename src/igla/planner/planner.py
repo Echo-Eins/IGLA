@@ -23,6 +23,7 @@ REPL renders to the user.
 from __future__ import annotations
 
 import json
+import re
 from contextlib import suppress
 from dataclasses import dataclass
 from typing import Any
@@ -78,6 +79,11 @@ class PlannerOutcome:
     last_decision: PolicyDecision | None
     summary: str | None
     aborted_reason: str | None = None
+
+
+@dataclass(frozen=True)
+class _TaskDoneSignal:
+    summary: str | None = None
 
 
 class PlannerError(Exception):
@@ -230,13 +236,13 @@ class Planner:
 
             kernel.state.reset_rejections(task.task_id)
             outcome = self._apply_action(proposal, task=task, todo=todo)
-            if outcome is _TASK_DONE:
+            if isinstance(outcome, _TaskDoneSignal):
                 return PlannerOutcome(
                     task_id=task.task_id,
                     status=TaskStatus.DONE,
                     iterations=kernel.state.get_state(task.task_id).iteration,
                     last_decision=decision,
-                    summary=_summary_of(proposal),
+                    summary=outcome.summary or _summary_of(proposal),
                 )
 
     def handle_user_input(
@@ -435,12 +441,11 @@ class Planner:
         *,
         task: TaskSpec,
         todo: TodoTree,
-    ) -> object:
+    ) -> _TaskDoneSignal | None:
         root = proposal.root
 
         if isinstance(root, ToolInvocationProposal):
-            self._invoke_tool(root, task=task, todo=todo)
-            return None
+            return self._invoke_tool(root, task=task, todo=todo)
 
         if isinstance(root, AskUserClarificationProposal):
             self._spawn_clarification(root, task=task, todo=todo)
@@ -468,7 +473,7 @@ class Planner:
         *,
         task: TaskSpec,
         todo: TodoTree,
-    ) -> None:
+    ) -> _TaskDoneSignal | None:
         kernel = self._kernel
         step_id = prefixed_id("step")
         invocation = ToolInvocation(
@@ -525,6 +530,55 @@ class Planner:
                 else:
                     todo.set_status(target.node_id, TodoStatus.BLOCKED)
         self._todo_store.save(todo)
+        return self._maybe_finish_simple_find_task(
+            proposal,
+            result_output=result.output,
+            result_status=result.status,
+            task=task,
+            todo=todo,
+        )
+
+    def _maybe_finish_simple_find_task(
+        self,
+        proposal: ToolInvocationProposal,
+        *,
+        result_output: dict[str, Any],
+        result_status: str,
+        task: TaskSpec,
+        todo: TodoTree,
+    ) -> _TaskDoneSignal | None:
+        """End trivial file-location tasks after a proven ``find_files`` result.
+
+        This is deliberately post-tool orchestration, not CLI command routing:
+        the planner still chooses the discovery tool, but the runtime refuses
+        to spend another LLM turn when the user's goal is only to locate a file
+        and the tool already produced a clear path.
+        """
+        if proposal.tool_name != "find_files" or result_status != "success":
+            return None
+        if not _is_simple_file_find_task(task):
+            return None
+
+        summary = _find_files_completion_summary(proposal.input, result_output)
+        if summary is None:
+            return None
+
+        with suppress(Exception):
+            todo.set_status(todo.root_id, TodoStatus.DONE)
+        evt = self._kernel.events.append(
+            kind=EventKind.TASK_COMPLETED,
+            actor="runtime",
+            task_id=task.task_id,
+            payload={
+                "summary": summary,
+                "reason": "deterministic_find_files_result",
+            },
+        )
+        self._motivation.dispatch(evt)
+        with suppress(Exception):
+            self._kernel.state.transition_mode(task.task_id, RuntimeMode.TASK_DONE)
+        self._todo_store.save(todo)
+        return _TaskDoneSignal(summary=summary)
 
     def _spawn_clarification(
         self,
@@ -790,7 +844,108 @@ def _truncate_text(text: str, max_chars: int) -> str:
     return text[: max_chars - 3] + "..."
 
 
-_TASK_DONE = object()
+_ASCII_FIND_WORDS = (
+    "find",
+    "locate",
+    "search",
+)
+_CYRILLIC_FIND_WORDS = (
+    "найд",
+    "найти",
+    "ищи",
+    "отыщи",
+)
+_ASCII_READ_OR_OPEN_WORDS = (
+    "open",
+    "read",
+    "show",
+    "display",
+    "inspect",
+)
+_CYRILLIC_READ_OR_OPEN_WORDS = (
+    "откро",
+    "прочит",
+    "прочти",
+    "покаж",
+    "вывед",
+    "изучи",
+    "посмотри",
+)
+
+
+def _is_simple_file_find_task(task: TaskSpec) -> bool:
+    text = f"{task.raw_request}\n{task.goal}".casefold()
+    ascii_words = set(re.findall(r"[a-z0-9_]+", text))
+    has_read_or_open = any(word in ascii_words for word in _ASCII_READ_OR_OPEN_WORDS) or any(
+        word in text for word in _CYRILLIC_READ_OR_OPEN_WORDS
+    )
+    if has_read_or_open:
+        return False
+    return any(word in ascii_words for word in _ASCII_FIND_WORDS) or any(
+        word in text for word in _CYRILLIC_FIND_WORDS
+    )
+
+
+def _find_files_completion_summary(
+    tool_input: dict[str, Any],
+    output: dict[str, Any],
+) -> str | None:
+    matches = [
+        str(match["relative_path"])
+        for match in output.get("matches", [])
+        if isinstance(match, dict) and match.get("relative_path")
+    ]
+    if not matches:
+        return None
+
+    requested = _requested_file_name(tool_input)
+    primary = _select_primary_find_match(requested, matches)
+    if primary is None:
+        return None
+
+    label = requested or primary.rsplit("/", 1)[-1]
+    alternatives = [path for path in matches if path != primary]
+    if not alternatives:
+        return f"Found {label}: {primary}"
+
+    shown_alternatives = ", ".join(alternatives[:5])
+    if len(alternatives) > 5:
+        shown_alternatives += f", ... +{len(alternatives) - 5} more"
+    return f"Found {label}: {primary} (also: {shown_alternatives})"
+
+
+def _requested_file_name(tool_input: dict[str, Any]) -> str:
+    value = str(tool_input.get("query") or tool_input.get("glob") or "").strip()
+    if not value or any(ch in value for ch in "*?[]"):
+        return ""
+    return value.replace("\\", "/").rstrip("/").rsplit("/", 1)[-1]
+
+
+def _select_primary_find_match(requested: str, matches: list[str]) -> str | None:
+    if not requested:
+        return matches[0] if len(matches) == 1 else None
+
+    requested_folded = requested.casefold()
+    exact_root = [path for path in matches if path.casefold() == requested_folded]
+    if len(exact_root) == 1:
+        return exact_root[0]
+
+    exact_name = [
+        path
+        for path in matches
+        if path.replace("\\", "/").rsplit("/", 1)[-1].casefold() == requested_folded
+    ]
+    if len(exact_name) == 1:
+        return exact_name[0]
+
+    root_name = [path for path in exact_name if "/" not in path.replace("\\", "/")]
+    if len(root_name) == 1:
+        return root_name[0]
+
+    return None
+
+
+_TASK_DONE = _TaskDoneSignal()
 
 
 class _MalformedProposal(PlannerError):

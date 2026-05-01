@@ -115,3 +115,22 @@
 - Bare `{"reason": "...", "question": "..."}` is now `MALFORMED_PROPOSAL`, not `QUESTION`.
 - Kept only the narrow missing-action `tool_invocation` repair path because it still passes through ToolRegistry/PolicyEngine.
 - Verified with `pytest tests/`: 89 passed.
+
+# Bugfix: finish proven simple find tasks without another LLM turn
+
+- [x] Capture failure mode: `find_files` returns README.md, then weak LLM keeps planning and corrupts the task.
+- [x] Add a small post-tool completion gate for simple file-find requests.
+- [x] Keep open/read flows model-driven after discovery; finding a file is not enough for "open/read".
+- [x] Clean terminal control characters/backspaces from plain CLI input.
+- [x] Add focused regressions for one-turn find completion and input cleanup.
+- [x] Verify tests and document review.
+
+## Review
+
+- Added a deterministic post-`find_files` completion gate for simple file-location tasks.
+- The gate only fires after a successful tool result and refuses to close open/read/show/inspect style tasks.
+- Added plain CLI input cleanup for leaked backspace/delete and ANSI CSI sequences.
+- Added regressions for one-turn README discovery completion and input cleanup.
+- Verified with `pytest tests/`: 92 passed.
+- Verified changed files with `ruff check src/igla/planner/planner.py src/igla/console_io.py tests/test_planner_loop.py tests/test_console_io.py`.
+- Verified changed source files with `mypy src/igla/planner/planner.py src/igla/console_io.py`.

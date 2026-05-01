@@ -58,3 +58,21 @@ model bypass the intended action grammar.
 The parser must not infer `ask_user_clarification` from a bare `question`.
 Only the narrow missing-action `tool_invocation` shape is safe to repair
 because it still goes through ToolRegistry and PolicyEngine.
+
+## 2026-04-30: Proven tool results need deterministic stop gates
+
+Do not spend another LLM turn when a read-only tool result already satisfies
+the user's simple goal. For plain file-location requests, `find_files` with a
+clear primary match is enough to complete the task; sending that result back
+to a weak local model invites irrelevant searches, unknown tools, or malformed
+questions.
+
+This must remain post-tool orchestration, not ad-hoc CLI command routing. The
+planner still chooses the discovery tool, but runtime may close the loop after
+evidence is available. Open/read/show/inspect style requests are different:
+finding the file is only an intermediate result and must continue toward
+`read_file`.
+
+Debug CLI input is part of the runtime contract. If a terminal leaks
+backspace/delete or ANSI control bytes into stdin, sanitize the line before it
+becomes a task goal; otherwise stale deleted text poisons the planner state.

@@ -16,7 +16,11 @@ We never want IGLA to crash on user input. This module provides:
 from __future__ import annotations
 
 import io
+import re
 import sys
+from contextlib import suppress
+
+_ANSI_CSI_RE = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
 
 
 def force_utf8_stdio() -> None:
@@ -26,10 +30,10 @@ def force_utf8_stdio() -> None:
     because the streams may already be detached or non-text.
     """
     for stream in (sys.stdin, sys.stdout, sys.stderr):
-        try:
-            stream.reconfigure(encoding="utf-8", errors="replace")  # type: ignore[attr-defined]
-        except Exception:  # noqa: BLE001 — best-effort
-            pass
+        reconfigure = getattr(stream, "reconfigure", None)
+        if callable(reconfigure):
+            with suppress(Exception):
+                reconfigure(encoding="utf-8", errors="replace")
 
 
 def safe_readline(prompt: str = "") -> str:
@@ -48,7 +52,7 @@ def safe_readline(prompt: str = "") -> str:
                 sys.stdout.flush()
             except Exception:  # noqa: BLE001
                 pass
-        return input()
+        return _clean_interactive_line(input())
     except (EOFError, KeyboardInterrupt):
         return ""
     except UnicodeError:
@@ -70,7 +74,33 @@ def _byte_fallback_readline() -> str:
     if not raw:
         return ""
     text = raw.decode("utf-8", errors="replace").rstrip("\r\n")
-    return text
+    return _clean_interactive_line(text)
+
+
+def _clean_interactive_line(text: str) -> str:
+    """Apply minimal terminal-edit semantics to a captured input line.
+
+    Some debug terminals leak control bytes into stdin instead of applying
+    canonical line editing. Keeping those bytes corrupts task text (for
+    example, a deleted prefix can survive as part of the next request).
+    """
+    if not text:
+        return text
+
+    text = _ANSI_CSI_RE.sub("", text)
+    chars: list[str] = []
+    for ch in text:
+        if ch in ("\b", "\x7f"):
+            if chars:
+                chars.pop()
+            continue
+        if ch == "\t":
+            chars.append(ch)
+            continue
+        if ord(ch) < 32 or ch == "\x1b":
+            continue
+        chars.append(ch)
+    return "".join(chars)
 
 
 def attach_utf8_buffer() -> None:

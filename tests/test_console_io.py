@@ -4,11 +4,11 @@ from __future__ import annotations
 import io
 import sys
 
-from igla.console_io import _byte_fallback_readline, safe_readline
+from igla.console_io import _byte_fallback_readline, _clean_interactive_line, safe_readline
 
 
 def test_byte_fallback_decodes_cyrillic_bytes(monkeypatch) -> None:
-    payload = "Прочитай файл\n".encode("utf-8")
+    payload = "Прочитай файл\n".encode()
     fake_stdin = io.BytesIO(payload)
     # ``sys.stdin`` may not exist as a real text wrapper in tests, but the
     # fallback only needs ``.buffer``. We construct a tiny stand-in.
@@ -40,7 +40,16 @@ def test_safe_readline_falls_back_on_unicode_error(monkeypatch) -> None:
     monkeypatch.setattr("builtins.input", _bad)
 
     class _Stdin:
-        buffer = io.BytesIO("ok\n".encode("utf-8"))
+        buffer = io.BytesIO(b"ok\n")
 
     monkeypatch.setattr(sys, "stdin", _Stdin())
     assert safe_readline() == "ok"
+
+
+def test_clean_interactive_line_applies_backspace_and_delete() -> None:
+    assert _clean_interactive_line("abc\x7fd") == "abd"
+    assert _clean_interactive_line("xy\b\bfind README.md") == "find README.md"
+
+
+def test_clean_interactive_line_drops_ansi_sequences() -> None:
+    assert _clean_interactive_line("\x1b[31mREADME.md\x1b[0m") == "README.md"
