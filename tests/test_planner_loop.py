@@ -171,7 +171,7 @@ def test_malformed_question_is_rejected_before_discovery(make_settings) -> None:
         for e in kernel.events.list_by_task(task.task_id)
         if e.kind is EventKind.POLICY_REJECTION
     ]
-    assert [e.payload["reason_code"] for e in rejections] == ["MUST_DISCOVER_FIRST"]
+    assert [e.payload["reason_code"] for e in rejections] == ["MALFORMED_PROPOSAL"]
     completed_tools = [
         e.payload["tool_name"]
         for e in kernel.events.list_by_task(task.task_id)

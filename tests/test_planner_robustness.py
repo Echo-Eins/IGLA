@@ -1,16 +1,16 @@
 """Robustness of planner against malformed LLM proposals."""
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
+
+from conftest import build_runtime  # type: ignore[import-not-found]
+from test_planner_loop import _new_task  # type: ignore[import-not-found]
 
 from igla.kernel.clock import StepClock
 from igla.planner.planner import _coerce_proposal_shape
 from igla.protocol.event import EventKind
 from igla.protocol.task import TaskStatus
 from igla.todo.tree import TodoTree
-
-from conftest import build_runtime  # type: ignore[import-not-found]
-from test_planner_loop import _new_task  # type: ignore[import-not-found]
 
 
 def test_coerce_infers_tool_invocation() -> None:
@@ -26,27 +26,29 @@ def test_coerce_infers_tool_invocation() -> None:
     assert note and "tool_invocation" in note
 
 
-def test_coerce_infers_ask_user_clarification() -> None:
+def test_coerce_does_not_infer_ask_user_clarification() -> None:
     raw = {"reason": "need info", "question": "where?"}
     coerced, note = _coerce_proposal_shape(raw)
-    assert coerced["action"] == "ask_user_clarification"
-    assert note
+    assert "action" not in coerced
+    assert note is None
 
 
-def test_coerce_infers_todo_branch() -> None:
+def test_coerce_does_not_infer_todo_branch() -> None:
     raw = {
         "reason": "split",
         "parent_node_id": "n",
         "children": [{"title": "x", "kind": "subgoal"}],
     }
-    coerced, _ = _coerce_proposal_shape(raw)
-    assert coerced["action"] == "todo_branch"
+    coerced, note = _coerce_proposal_shape(raw)
+    assert "action" not in coerced
+    assert note is None
 
 
-def test_coerce_infers_declare_task_done() -> None:
+def test_coerce_does_not_infer_declare_task_done() -> None:
     raw = {"reason": "all set", "summary": "done"}
-    coerced, _ = _coerce_proposal_shape(raw)
-    assert coerced["action"] == "declare_task_done"
+    coerced, note = _coerce_proposal_shape(raw)
+    assert "action" not in coerced
+    assert note is None
 
 
 def test_coerce_keeps_existing_action() -> None:
@@ -78,7 +80,7 @@ def test_planner_recovers_from_missing_action_field(make_settings) -> None:
     planner, kernel, _, _, _ = build_runtime(
         settings,
         canned_responses=canned,
-        clock=StepClock(datetime(2026, 4, 29, tzinfo=timezone.utc), step_seconds=0.1),
+        clock=StepClock(datetime(2026, 4, 29, tzinfo=UTC), step_seconds=0.1),
     )
     task = _new_task("read file", kernel)
     todo = TodoTree(task.task_id, kernel.clock)
@@ -112,7 +114,7 @@ def test_planner_records_rejection_for_truly_unrecoverable(make_settings) -> Non
     planner, kernel, _, _, _ = build_runtime(
         settings,
         canned_responses=canned,
-        clock=StepClock(datetime(2026, 4, 29, tzinfo=timezone.utc), step_seconds=0.1),
+        clock=StepClock(datetime(2026, 4, 29, tzinfo=UTC), step_seconds=0.1),
     )
     task = _new_task("x", kernel)
     todo = TodoTree(task.task_id, kernel.clock)
@@ -136,7 +138,7 @@ def test_planner_aborts_on_repeated_malformed(make_settings) -> None:
     planner, kernel, _, _, _ = build_runtime(
         settings,
         canned_responses=canned,
-        clock=StepClock(datetime(2026, 4, 29, tzinfo=timezone.utc), step_seconds=0.1),
+        clock=StepClock(datetime(2026, 4, 29, tzinfo=UTC), step_seconds=0.1),
     )
     task = _new_task("x", kernel)
     todo = TodoTree(task.task_id, kernel.clock)

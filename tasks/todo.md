@@ -99,3 +99,19 @@
 - Policy now denies user questions when discovery already produced an unambiguous result.
 - Added regressions proving `AGENTS.md` appears in the next planner prompt and a question after that result is rejected.
 - Verified with `pytest tests/`: 88 passed.
+
+# Bugfix: strict planner action boundary
+
+- [x] Capture root cause: schema variants allow missing `action` because discriminator fields have defaults.
+- [x] Make `action` required in every PlannerProposal JSON Schema variant.
+- [x] Stop coercing bare `question` payloads into user clarification.
+- [x] Update malformed proposal regressions.
+- [x] Verify tests and document lessons.
+
+## Review
+
+- PlannerProposal JSON Schema now requires `action` in every concrete variant and removes the discriminator default from schema output.
+- Parser no longer infers `ask_user_clarification`, `todo_branch`, or `declare_task_done` from missing-action payloads.
+- Bare `{"reason": "...", "question": "..."}` is now `MALFORMED_PROPOSAL`, not `QUESTION`.
+- Kept only the narrow missing-action `tool_invocation` repair path because it still passes through ToolRegistry/PolicyEngine.
+- Verified with `pytest tests/`: 89 passed.

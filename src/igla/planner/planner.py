@@ -812,11 +812,10 @@ class _MalformedProposal(PlannerError):
 def _coerce_proposal_shape(raw: dict[str, Any]) -> tuple[dict[str, Any], str | None]:
     """Best-effort recovery of a missing ``action`` discriminator.
 
-    Some local models (especially without strict ``response_format``)
-    routinely omit the discriminator while emitting an otherwise well-shaped
-    proposal. We patch the obvious shapes so parsing succeeds; if the patch
-    is wrong, the policy engine still rejects later. Returns the (possibly
-    patched) dict plus a short human-readable note about what we did.
+    Some local models omit the discriminator while emitting an otherwise
+    well-shaped tool call. We only repair that narrow case because it is still
+    routed through ToolRegistry/PolicyEngine. Bare ``question`` payloads must
+    stay malformed; otherwise the parser itself becomes a user-contact bypass.
     """
     if not isinstance(raw, dict):
         return raw, None
@@ -827,16 +826,4 @@ def _coerce_proposal_shape(raw: dict[str, Any]) -> tuple[dict[str, Any], str | N
     if "tool_name" in raw and "tool_version" in raw:
         patched["action"] = "tool_invocation"
         note = "inferred action='tool_invocation' from presence of tool_name/tool_version"
-    elif "question" in raw:
-        patched["action"] = "ask_user_clarification"
-        note = "inferred action='ask_user_clarification' from presence of 'question'"
-    elif "parent_node_id" in raw and "children" in raw:
-        patched["action"] = "todo_branch"
-        note = "inferred action='todo_branch' from presence of parent_node_id/children"
-    elif "node_id" in raw and "summary" in raw:
-        patched["action"] = "todo_complete"
-        note = "inferred action='todo_complete' from presence of node_id/summary"
-    elif "summary" in raw and len(raw) <= 4:
-        patched["action"] = "declare_task_done"
-        note = "inferred action='declare_task_done' from minimal summary-only payload"
     return patched, note

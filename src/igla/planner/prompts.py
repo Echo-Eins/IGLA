@@ -429,6 +429,14 @@ def _normalise_schema(node: Any) -> None:
     if isinstance(node, dict):
         if node.get("type") == "object" and "additionalProperties" not in node:
             node["additionalProperties"] = False
+        properties = node.get("properties")
+        if isinstance(properties, dict) and "action" in properties:
+            required = list(node.get("required") or [])
+            if "action" not in required:
+                required.append("action")
+                node["required"] = required
+            if isinstance(properties["action"], dict):
+                properties["action"].pop("default", None)
         for value in node.values():
             _normalise_schema(value)
     elif isinstance(node, list):

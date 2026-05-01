@@ -47,3 +47,14 @@ user for a path that the runtime already discovered.
 
 If discovery returns one clear result, user contact must be denied. The next
 valid move is to use the discovered path (`read_file`) or finish the task.
+
+## 2026-04-30: Missing action is malformed, not clarification
+
+PlannerProposal's `action` discriminator must be required in every schema
+variant. Defaults on discriminator fields can make structured-output engines
+treat `{"reason": "...", "question": "..."}` as valid, which lets a weak
+model bypass the intended action grammar.
+
+The parser must not infer `ask_user_clarification` from a bare `question`.
+Only the narrow missing-action `tool_invocation` shape is safe to repair
+because it still goes through ToolRegistry and PolicyEngine.

@@ -2,17 +2,25 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from igla.ids import prefixed_id
+from igla.planner.llm_client import LLMChatMessage
 from igla.planner.prompts import (
     SESSION_HARD_RULES,
     TOOL_USAGE_EXAMPLES,
     build_proposal_messages,
+    build_proposal_schema,
     build_session_system_message,
     build_task_system_message,
     build_turn_user_message,
     tools_digest_from_registry_dump,
+)
+from igla.protocol.policy import (
+    ActionRequest,
+    PolicyDecision,
+    PolicyDecisionKind,
+    PolicyRejection,
 )
 from igla.protocol.runtime import RuntimeMode, RuntimeStateSnapshot
 from igla.protocol.task import TaskSpec, TaskStatus
@@ -27,7 +35,7 @@ def _runtime_snapshot(task_id: str, mode: RuntimeMode = RuntimeMode.READY) -> Ru
         consecutive_rejections=0,
         allowed_next_actions=["tool:find_files", "tool:search_text"],
         forbidden_next_actions=[],
-        captured_at=datetime(2026, 4, 29, tzinfo=timezone.utc),
+        captured_at=datetime(2026, 4, 29, tzinfo=UTC),
     )
 
 
@@ -37,7 +45,7 @@ def _new_task() -> TaskSpec:
         raw_request="Найди и открой 00-review.md",
         goal="Найди и открой 00-review.md",
         status=TaskStatus.READY,
-        created_at=datetime(2026, 4, 29, tzinfo=timezone.utc),
+        created_at=datetime(2026, 4, 29, tzinfo=UTC),
     )
 
 
@@ -141,13 +149,6 @@ def test_turn_user_message_is_compact_delta(step_clock) -> None:
 
 
 def test_turn_user_message_includes_rejection_when_present(step_clock) -> None:
-    from igla.protocol.policy import (
-        ActionRequest,
-        PolicyDecision,
-        PolicyDecisionKind,
-        PolicyRejection,
-    )
-
     task = _new_task()
     todo = TodoTree(task.task_id, step_clock)
     todo.create_root(title=task.goal)
@@ -182,8 +183,6 @@ def test_turn_user_message_includes_rejection_when_present(step_clock) -> None:
 
 def test_proposal_messages_uses_caches(step_clock) -> None:
     """Caller-supplied cached messages bypass the per-turn rebuild."""
-    from igla.planner.llm_client import LLMChatMessage
-
     task = _new_task()
     todo = TodoTree(task.task_id, step_clock)
     todo.create_root(title=task.goal)
@@ -222,3 +221,19 @@ def test_legacy_keyword_alias_still_works(step_clock) -> None:
     )
     payload = json.loads(messages[2].content)
     assert payload["new_events_since_last_turn"][0]["kind"] == "task_created"
+
+
+def test_proposal_schema_requires_action_discriminator() -> None:
+    schema = build_proposal_schema()
+    defs = schema["$defs"]
+    proposal_names = [
+        "ToolInvocationProposal",
+        "AskUserClarificationProposal",
+        "TodoBranchProposal",
+        "TodoCompleteProposal",
+        "DeclareTaskDoneProposal",
+    ]
+    for name in proposal_names:
+        proposal = defs[name]
+        assert "action" in proposal["required"]
+        assert "default" not in proposal["properties"]["action"]
