@@ -1,7 +1,9 @@
 """IGLA CLI entry point.
 
 Subcommands:
-* ``igla chat``   — interactive chat (default).
+* ``igla chat``   — plain interactive chat (default).
+* ``igla run``    — plain one-shot request.
+* ``igla rich-chat`` — old Rich REPL.
 * ``igla doctor`` — print effective settings + available tools, then exit.
 * ``igla version`` — print version.
 """
@@ -16,13 +18,15 @@ from rich.panel import Panel
 from rich.table import Table
 
 from . import __version__
+from .chat.plain import PlainCLI
 from .chat.repl import ChatREPL
 from .config import IglaSettings, load_settings
 from .console_io import attach_utf8_buffer, force_utf8_stdio
 from .kernel.kernel import Kernel
+from .motivation.rule import load_rules
 from .planner.llm_client import LMStudioClient
 from .policies.constitution import load_constitution
-from .motivation.rule import load_rules
+from .protocol.task import TaskStatus
 
 
 def _build_settings(args: argparse.Namespace) -> IglaSettings:
@@ -59,6 +63,32 @@ def _make_llm(settings: IglaSettings) -> LMStudioClient:
 
 
 def cmd_chat(args: argparse.Namespace) -> int:
+    settings = _build_settings(args)
+    llm = _make_llm(settings)
+    try:
+        cli = PlainCLI(settings=settings, llm=llm)
+        cli.run_loop()
+    finally:
+        llm.close()
+    return 0
+
+
+def cmd_run(args: argparse.Namespace) -> int:
+    request = " ".join(args.request).strip()
+    if not request:
+        print("error: run requires a request", file=sys.stderr)
+        return 2
+    settings = _build_settings(args)
+    llm = _make_llm(settings)
+    try:
+        cli = PlainCLI(settings=settings, llm=llm)
+        outcome = cli.run_once(request)
+    finally:
+        llm.close()
+    return 0 if outcome.status is TaskStatus.DONE else 1
+
+
+def cmd_rich_chat(args: argparse.Namespace) -> int:
     settings = _build_settings(args)
     llm = _make_llm(settings)
     try:
@@ -162,7 +192,15 @@ def build_parser() -> argparse.ArgumentParser:
     )
 
     sub = parser.add_subparsers(dest="cmd")
-    sub.add_parser("chat", help="Start interactive chat (default)").set_defaults(func=cmd_chat)
+    sub.add_parser("chat", help="Start plain interactive chat (default)").set_defaults(
+        func=cmd_chat
+    )
+    run = sub.add_parser("run", help="Run one plain request and print copyable output")
+    run.add_argument("request", nargs=argparse.REMAINDER, help="Request text")
+    run.set_defaults(func=cmd_run)
+    sub.add_parser("rich-chat", help="Start the old Rich panel chat").set_defaults(
+        func=cmd_rich_chat
+    )
     sub.add_parser("doctor", help="Print settings, constitution, motivation, tools").set_defaults(
         func=cmd_doctor
     )

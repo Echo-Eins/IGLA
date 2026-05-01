@@ -31,3 +31,21 @@
 - `PLANNER_BOOTSTRAP_PROMPT` exists for a future stateful/session backend; current LM Studio Chat Completions is stateless, so a fake init request is not sent.
 - Per-step model input is now a single compact JSON block.
 - Verified with `pytest tests/`: 65 passed.
+
+# Temporary Plain CLI
+
+- [x] Capture requirement: disable Rich REPL as default and provide copyable plain output.
+- [x] Add a simple plain interactive CLI loop.
+- [x] Add a one-shot command for a single request.
+- [x] Keep every user request on a fresh task id.
+- [x] Add focused tests for plain output rendering / parser wiring.
+- [x] Verify tests.
+- [x] Review current prompt-send path without changing it.
+
+## Review
+
+- Default `igla` and `igla chat` now use plain text interactive CLI.
+- Added `igla run <request...>` for one-shot copyable debugging.
+- Old Rich UI remains available as `igla rich-chat`.
+- Each plain request creates a fresh task id; output lists status, TODO, and full task events.
+- Verified with `pytest tests/`: 75 passed.

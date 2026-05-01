@@ -49,7 +49,7 @@ src/igla/
 │   └── render.py         Текстовый и dict рендер
 ├── planner/              Планировщик + LM Studio клиент
 │   ├── llm_client.py     LMStudioClient + OfflineCannedClient
-│   ├── prompts.py        SYSTEM_PROMPT + build_proposal_messages + build_proposal_schema
+│   ├── prompts.py        PLANNER_BOOTSTRAP_PROMPT + compact JSON prompt builder
 │   └── planner.py        Главный цикл run_task / handle_user_input
 ├── tools/                Tool API + builtins
 │   ├── base.py           Tool ABC
@@ -58,9 +58,10 @@ src/igla/
 │       ├── search.py     find_files + search_text workspace discovery
 │       ├── read_file.py
 │       └── noop_observe.py
-├── chat/                 REPL
+├── chat/
+│   ├── plain.py          PlainCLI: copyable text output + event timeline
 │   └── repl.py           ChatREPL + ConsoleAskUserChannel + Rich-вывод
-└── cli.py                igla {chat,doctor,version}
+└── cli.py                igla {chat,run,rich-chat,doctor,version}
 ```
 
 ## Конфиги
@@ -86,8 +87,14 @@ src/igla/
 ## CLI
 
 ```bash
-# Запуск интерактивного чата (по умолчанию):
+# Запуск plain интерактивного чата (по умолчанию):
 igla --workspace /path/to/work chat
+
+# Один запрос с copyable output:
+igla --workspace /path/to/work run "найди файл AGENTS.md и открой его"
+
+# Старый Rich REPL:
+igla --workspace /path/to/work rich-chat
 
 # Сводка по конфигам, политикам, мотивации, тулам:
 igla --workspace /path doctor
@@ -108,7 +115,7 @@ IGLA_LMSTUDIO_KEY       (или --lm-key, default: 'lm-studio')
 
 ## Тесты
 
-`tests/` — 65 кейсов:
+`tests/` — 75 кейсов:
 
 | Файл | Покрывает |
 |------|-----------|
@@ -120,6 +127,7 @@ IGLA_LMSTUDIO_KEY       (или --lm-key, default: 'lm-studio')
 | `test_policy_engine.py`  | unknown_tool, schema, allowed/forbidden, no_blind_retry |
 | `test_prompts.py`        | prompt hot path: no repeated system message |
 | `test_motivation.py`     | bootstrap, failure diagnosis, clarification, task done |
+| `test_plain_cli.py`      | copyable plain output and event timeline |
 | `test_planner_loop.py`   | end-to-end через OfflineCannedClient: declare/branch/clarify/diagnose |
 
 Запуск:
