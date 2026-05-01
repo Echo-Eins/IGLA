@@ -49,3 +49,20 @@
 - Old Rich UI remains available as `igla rich-chat`.
 - Each plain request creates a fresh task id; output lists status, TODO, and full task events.
 - Verified with `pytest tests/`: 75 passed.
+
+# Bugfix: reset poisoned state and v-prefixed tool versions
+
+- [x] Capture failure mode from plain CLI log.
+- [x] Add safe workspace state reset command.
+- [x] Add `/reset-state` to the plain CLI and rewire in-process runtime after reset.
+- [x] Accept planner tool versions with a leading `v` prefix.
+- [x] Add focused regression tests.
+- [x] Verify tests and document review.
+
+## Review
+
+- Added safe reset helper for workspace `.igla` state.
+- Added `igla reset-state` and `/reset-state`; the plain CLI rewires Kernel/TodoStore/Planner after reset.
+- Registry now accepts `v1.0.0` / `V1.0.0` references for tools registered as `1.0.0`.
+- Documented the new command in `docs/ENGINE.md`.
+- Verified with `pytest tests/`: 81 passed.

@@ -17,6 +17,18 @@ def test_register_and_lookup() -> None:
     assert reg.get_tool("noop_observe") is tool
 
 
+def test_lookup_accepts_v_prefixed_version_refs() -> None:
+    reg = ToolRegistry()
+    tool = NoopObserveTool()
+    reg.register(tool)
+
+    manifest = reg.get("noop_observe", "v1.0.0")
+
+    assert manifest.version == "1.0.0"
+    assert reg.has("noop_observe", "V1.0.0")
+    assert reg.get_tool("noop_observe", "v1.0.0") is tool
+
+
 def test_duplicate_registration_raises() -> None:
     reg = ToolRegistry()
     reg.register(NoopObserveTool())

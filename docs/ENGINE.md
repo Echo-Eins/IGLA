@@ -8,6 +8,7 @@
 src/igla/
 ├── ids.py                ULID-генератор
 ├── config.py             Pydantic-модели IglaSettings, LMStudioSettings, PathsSettings
+├── state_reset.py        Safe reset for workspace `.igla` runtime state
 ├── protocol/             Замороженные envelope'ы (см. 04-tool-protocol.md)
 │   ├── invocation.py     ToolInvocation + Context/PolicyHints/Dependencies/Provenance
 │   ├── result.py         ToolResult, ToolError, ToolResultMetric
@@ -61,7 +62,7 @@ src/igla/
 ├── chat/
 │   ├── plain.py          PlainCLI: copyable text output + event timeline
 │   └── repl.py           ChatREPL + ConsoleAskUserChannel + Rich-вывод
-└── cli.py                igla {chat,run,rich-chat,doctor,version}
+└── cli.py                igla {chat,run,reset-state,rich-chat,doctor,version}
 ```
 
 ## Конфиги
@@ -93,6 +94,9 @@ igla --workspace /path/to/work chat
 # Один запрос с copyable output:
 igla --workspace /path/to/work run "найди файл AGENTS.md и открой его"
 
+# Reset poisoned runtime state (.igla):
+igla --workspace /path/to/work reset-state
+
 # Старый Rich REPL:
 igla --workspace /path/to/work rich-chat
 
@@ -115,7 +119,7 @@ IGLA_LMSTUDIO_KEY       (или --lm-key, default: 'lm-studio')
 
 ## Тесты
 
-`tests/` — 75 кейсов:
+`tests/` — 81 кейс:
 
 | Файл | Покрывает |
 |------|-----------|
@@ -123,6 +127,7 @@ IGLA_LMSTUDIO_KEY       (или --lm-key, default: 'lm-studio')
 | `test_discovery_tools.py` | workspace-bounded find_files/search_text |
 | `test_event_store.py`    | append, iter_all, filter, torn-line tolerance |
 | `test_registry.py`       | register/get/resolve, дубли |
+| `test_state_reset.py`    | safe workspace `.igla` reset and CLI command |
 | `test_todo_tree.py`      | ветвление, агрегация статуса, snapshot round-trip |
 | `test_policy_engine.py`  | unknown_tool, schema, allowed/forbidden, no_blind_retry |
 | `test_prompts.py`        | prompt hot path: no repeated system message |

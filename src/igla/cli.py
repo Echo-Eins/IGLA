@@ -27,6 +27,14 @@ from .motivation.rule import load_rules
 from .planner.llm_client import LMStudioClient
 from .policies.constitution import load_constitution
 from .protocol.task import TaskStatus
+from .state_reset import StateResetError, reset_workspace_state
+from .tools.builtin import (
+    AskUserTool,
+    FindFilesTool,
+    NoopObserveTool,
+    ReadFileTool,
+    SearchTextTool,
+)
 
 
 def _build_settings(args: argparse.Namespace) -> IglaSettings:
@@ -88,6 +96,23 @@ def cmd_run(args: argparse.Namespace) -> int:
     return 0 if outcome.status is TaskStatus.DONE else 1
 
 
+def cmd_reset_state(args: argparse.Namespace) -> int:
+    settings = _build_settings(args)
+    try:
+        result = reset_workspace_state(
+            workspace=settings.paths.workspace,
+            state_dir=settings.paths.state_dir,
+        )
+    except StateResetError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+    if result.removed:
+        print(f"removed state_dir: {result.state_dir}")
+    else:
+        print(f"state_dir did not exist: {result.state_dir}")
+    return 0
+
+
 def cmd_rich_chat(args: argparse.Namespace) -> int:
     settings = _build_settings(args)
     llm = _make_llm(settings)
@@ -137,14 +162,6 @@ def cmd_doctor(args: argparse.Namespace) -> int:
     class _DummyAsk:
         def ask(self, *, question: str, prompt_label: str | None = None) -> str:
             return ""
-
-    from .tools.builtin import (
-        AskUserTool,
-        FindFilesTool,
-        NoopObserveTool,
-        ReadFileTool,
-        SearchTextTool,
-    )
 
     kernel.registry.register_many(
         [
@@ -198,6 +215,9 @@ def build_parser() -> argparse.ArgumentParser:
     run = sub.add_parser("run", help="Run one plain request and print copyable output")
     run.add_argument("request", nargs=argparse.REMAINDER, help="Request text")
     run.set_defaults(func=cmd_run)
+    sub.add_parser("reset-state", help="Remove workspace .igla runtime state").set_defaults(
+        func=cmd_reset_state
+    )
     sub.add_parser("rich-chat", help="Start the old Rich panel chat").set_defaults(
         func=cmd_rich_chat
     )

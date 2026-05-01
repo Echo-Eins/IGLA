@@ -12,14 +12,12 @@ optional pre-release). For the MVP we only need monotonic numeric compare.
 from __future__ import annotations
 
 from collections.abc import Iterable
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from ..protocol.manifest import ToolManifest
 from .errors import KernelError, ToolNotFoundError
 
 # avoid circular import with tools.base
-from typing import TYPE_CHECKING
-
 if TYPE_CHECKING:  # pragma: no cover
     from ..tools.base import Tool
 
@@ -37,14 +35,22 @@ def _parse_version(version: str) -> tuple[int, ...]:
     return tuple(out)
 
 
+def _normalize_version_ref(version: str | None) -> str | None:
+    if version is None:
+        return None
+    if len(version) > 1 and version[0] in {"v", "V"} and version[1].isdigit():
+        return version[1:]
+    return version
+
+
 class ToolRegistry:
     def __init__(self) -> None:
-        self._tools: dict[tuple[str, str], "Tool"] = {}
+        self._tools: dict[tuple[str, str], Tool] = {}
         self._manifests: dict[tuple[str, str], ToolManifest] = {}
 
     # --- registration ---------------------------------------------------
 
-    def register(self, tool: "Tool") -> None:
+    def register(self, tool: Tool) -> None:
         manifest = tool.manifest
         key = (manifest.name, manifest.version)
         if key in self._manifests:
@@ -52,7 +58,7 @@ class ToolRegistry:
         self._tools[key] = tool
         self._manifests[key] = manifest
 
-    def register_many(self, tools: Iterable["Tool"]) -> None:
+    def register_many(self, tools: Iterable[Tool]) -> None:
         for tool in tools:
             self.register(tool)
 
@@ -64,7 +70,7 @@ class ToolRegistry:
             raise ToolNotFoundError(f"tool not found: {name}@{version or '*'}")
         return manifest
 
-    def get_tool(self, name: str, version: str | None = None) -> "Tool":
+    def get_tool(self, name: str, version: str | None = None) -> Tool:
         manifest = self.get(name, version)
         return self._tools[(manifest.name, manifest.version)]
 
@@ -85,6 +91,7 @@ class ToolRegistry:
     # --- internals ------------------------------------------------------
 
     def _lookup_manifest(self, name: str, version: str | None) -> ToolManifest | None:
+        version = _normalize_version_ref(version)
         if version is not None:
             return self._manifests.get((name, version))
         # Find the highest version registered under that name.

@@ -28,3 +28,19 @@ def test_plain_cli_run_once_prints_copyable_timeline(make_settings, capsys) -> N
     assert "STATUS done" in out
     assert "EVENTS" in out
     assert "llm_request_sent actor=planner" in out
+
+
+def test_plain_cli_reset_state_removes_poisoned_runtime(make_settings, capsys) -> None:
+    settings = make_settings()
+    poison = settings.paths.state_dir / "poison.txt"
+    poison.parent.mkdir(parents=True, exist_ok=True)
+    poison.write_text("bad state", encoding="utf-8")
+    cli = PlainCLI(settings=settings, llm=OfflineCannedClient([]))
+
+    should_exit = cli._handle_command("/reset-state")
+
+    assert should_exit is False
+    assert not poison.exists()
+    assert settings.paths.state_dir.exists()
+    out = capsys.readouterr().out
+    assert "STATE_RESET removed" in out

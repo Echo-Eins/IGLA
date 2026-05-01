@@ -21,6 +21,7 @@ from ..policies.engine import PolicyContext, PolicyEngine
 from ..protocol.event import EventRecord
 from ..protocol.task import TaskSpec, TaskStatus
 from ..protocol.todo import TodoStatus
+from ..state_reset import StateResetError, reset_workspace_state
 from ..todo.render import render_text
 from ..todo.store import TodoStore
 from ..todo.tree import TodoTree
@@ -57,15 +58,19 @@ class _PlainAskUserChannel:
 class PlainCLI:
     def __init__(self, *, settings: IglaSettings, llm: LLMClient) -> None:
         self._settings = settings
+        self._llm = llm
         self._transcript = PlainTranscript()
-        self._kernel = Kernel(settings)
-        self._todo_store = TodoStore(settings.paths.todo_dir)
-        self._planner = self._build_planner(llm)
+        self._wire_runtime()
+
+    def _wire_runtime(self) -> None:
+        self._kernel = Kernel(self._settings)
+        self._todo_store = TodoStore(self._settings.paths.todo_dir)
+        self._planner = self._build_planner(self._llm)
 
     def run_loop(self) -> None:
         print("IGLA plain CLI")
         print(f"workspace: {self._settings.paths.workspace}")
-        print("commands: /quit /state /todo")
+        print("commands: /quit /state /todo /reset-state")
         while True:
             text = safe_readline("> ").strip()
             if not text:
@@ -162,9 +167,25 @@ class PlainCLI:
             return True
         if command == "/state":
             print(f"workspace: {self._settings.paths.workspace}")
+            print(f"state_dir: {self._settings.paths.state_dir}")
             print(f"events: {sum(1 for _ in self._kernel.events.iter_all())}")
             tools = ", ".join(m.name for m in self._kernel.registry.list_tools())
             print(f"tools: {tools}")
+            return False
+        if command == "/reset-state":
+            try:
+                result = reset_workspace_state(
+                    workspace=self._settings.paths.workspace,
+                    state_dir=self._settings.paths.state_dir,
+                )
+            except StateResetError as exc:
+                print(f"ERROR {exc}")
+                return False
+            self._wire_runtime()
+            if result.removed:
+                print(f"STATE_RESET removed {result.state_dir}")
+            else:
+                print(f"STATE_RESET already_absent {result.state_dir}")
             return False
         if command == "/todo":
             task_id = rest.strip() or self._last_task_id()
