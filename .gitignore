@@ -30,3 +30,5 @@ coverage.xml
 # IGLA runtime state
 .igla/
 **/.igla/
+/.idea/
+.idea/
