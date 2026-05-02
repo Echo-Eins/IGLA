@@ -14,6 +14,7 @@ Read-only / discovery:
 * ``noop_observe``     — declarative no-op for the planner.
 
 Mutating (require backup + receipt invariants):
+* ``copy_file``        — copy a workspace file to a new path, optional append.
 * ``patch_file``       — edit a workspace file with mandatory backup.
 * ``restore_file``     — revert a prior patch_file invocation.
 
@@ -24,7 +25,12 @@ recorded as events. This keeps the protocol cleanly separated:
 ``ToolInvocation`` is for "did something to the world", and the action
 proposals are for "navigated the TODO/plan".
 """
+from ...kernel.receipt_manager import ReceiptManager
+from ...kernel.rollback_manager import RollbackManager
+from ...kernel.task_work_log import TaskWorkLog
+from ..base import Tool
 from .ask_user import AskUserChannel, AskUserTool, ConsoleAskUserChannel
+from .copy_file import CopyFileTool
 from .list_dir import ListDirTool
 from .noop_observe import NoopObserveTool
 from .patch_file import PatchFileTool
@@ -38,6 +44,7 @@ __all__ = [
     "AskUserChannel",
     "AskUserTool",
     "ConsoleAskUserChannel",
+    "CopyFileTool",
     "FindFilesTool",
     "ListDirTool",
     "NoopObserveTool",
@@ -54,10 +61,10 @@ def build_default_toolset(
     *,
     ask_user_channel: AskUserChannel,
     workspace_root: str,
-    receipts,  # ReceiptManager
-    rollback,  # RollbackManager
-    work_log,  # TaskWorkLog
-) -> list:
+    receipts: ReceiptManager,
+    rollback: RollbackManager,
+    work_log: TaskWorkLog,
+) -> list[Tool]:
     """Construct the default in-process tool instances."""
     return [
         AskUserTool(channel=ask_user_channel),
@@ -65,6 +72,11 @@ def build_default_toolset(
         ListDirTool(workspace_root=workspace_root),
         ReadFileTool(workspace_root=workspace_root, receipts=receipts),
         SearchTextTool(workspace_root=workspace_root),
+        CopyFileTool(
+            workspace_root=workspace_root,
+            receipts=receipts,
+            rollback=rollback,
+        ),
         PatchFileTool(
             workspace_root=workspace_root,
             receipts=receipts,

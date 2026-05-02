@@ -27,6 +27,7 @@ from ..todo.store import TodoStore
 from ..todo.tree import TodoTree
 from ..tools.builtin import (
     AskUserTool,
+    CopyFileTool,
     FindFilesTool,
     ListDirTool,
     NoopObserveTool,
@@ -130,6 +131,11 @@ class PlainCLI:
                     receipts=self._kernel.receipts,
                 ),
                 SearchTextTool(workspace_root=str(self._settings.paths.workspace)),
+                CopyFileTool(
+                    workspace_root=str(self._settings.paths.workspace),
+                    receipts=self._kernel.receipts,
+                    rollback=self._kernel.rollback,
+                ),
                 PatchFileTool(
                     workspace_root=str(self._settings.paths.workspace),
                     receipts=self._kernel.receipts,

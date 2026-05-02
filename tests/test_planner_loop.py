@@ -289,6 +289,39 @@ def test_read_file_compact_output_preserves_chunk_progress() -> None:
     assert compact["file_sha256"] == "sha256:file"
 
 
+def test_copy_file_compact_output_exposes_destination() -> None:
+    compact = _compact_tool_output(
+        "copy_file",
+        {
+            "source_path": "/workspace/README.md",
+            "destination_path": "/workspace/README1.md",
+            "bytes_source": 10,
+            "bytes_written": 16,
+            "appended_bytes": 6,
+            "sha256_source": "sha256:source",
+            "sha256_after": "sha256:dest",
+            "overwrote": False,
+            "backup_artifact_id": None,
+            "rollback_plan_id": None,
+            "receipt_id": "rcp_1",
+        },
+    )
+
+    assert compact == {
+        "source_path": "/workspace/README.md",
+        "destination_path": "/workspace/README1.md",
+        "bytes_source": 10,
+        "bytes_written": 16,
+        "appended_bytes": 6,
+        "sha256_source": "sha256:source",
+        "sha256_after": "sha256:dest",
+        "overwrote": False,
+        "backup_artifact_id": None,
+        "rollback_plan_id": None,
+        "receipt_id": "rcp_1",
+    }
+
+
 def test_simple_find_file_task_finishes_after_find_files_result(make_settings) -> None:
     settings = make_settings()
     (settings.paths.workspace / "README.md").write_text("# Root\n", encoding="utf-8")
@@ -563,6 +596,44 @@ def test_large_read_recovers_from_file_too_large_and_allows_done(make_settings) 
     ]
     assert completed[0].payload["output"]["end_line"] == 1000
     assert completed[0].payload["output"]["end_of_file"] is False
+
+
+def test_copy_file_flow_can_create_copy_with_append(make_settings) -> None:
+    settings = make_settings()
+    (settings.paths.workspace / "README.md").write_text("body\n", encoding="utf-8")
+    canned = [
+        {
+            "action": "tool_invocation",
+            "tool_name": "copy_file",
+            "tool_version": "1.0.0",
+            "input": {
+                "source_path": "README.md",
+                "destination_path": "README1.md",
+                "append_text": "hello\n",
+            },
+            "reason": "Copy README.md to README1.md and append hello.",
+        },
+        {
+            "action": "declare_task_done",
+            "summary": "README1.md created",
+            "reason": "copy_file succeeded",
+        },
+    ]
+    planner, kernel, _, _, _ = build_runtime(
+        settings,
+        canned_responses=canned,
+        clock=StepClock(datetime(2026, 4, 29, tzinfo=UTC), step_seconds=0.1),
+    )
+    task = _new_task("copy README.md to README1.md and append hello", kernel)
+    todo = TodoTree(task.task_id, kernel.clock)
+    todo.create_root(title="copy")
+
+    outcome = planner.run_task(task, todo)
+
+    assert outcome.status is TaskStatus.DONE
+    assert (settings.paths.workspace / "README1.md").read_text(encoding="utf-8") == (
+        "body\nhello\n"
+    )
 
 
 def test_policy_rejection_loops_until_max(make_settings) -> None:

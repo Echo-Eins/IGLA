@@ -1,4 +1,4 @@
-"""LM Studio (OpenAI-compatible) client + an offline test client.
+"""LLM clients + an offline test client.
 
 Notes on LM Studio:
 * It speaks the OpenAI Chat Completions API at ``<base_url>/chat/completions``.
@@ -13,6 +13,13 @@ We deliberately keep the request narrow:
 * temperature/top_p/max_tokens from settings.
 * No streaming. No tools. No function-calling. The structured output IS the
   proposal envelope; the planner parses it directly.
+
+Notes on Ollama:
+* The native endpoint is ``<base_url>/api/chat``.
+* Streaming is disabled with ``stream=false`` so the planner gets one JSON
+  response object.
+* Structured outputs use Ollama's ``format`` field. It accepts either
+  ``"json"`` or a JSON Schema object.
 """
 from __future__ import annotations
 
@@ -39,8 +46,14 @@ class LLMClient(Protocol):
         schema_name: str = "PlannerProposal",
     ) -> dict[str, Any]: ...
 
+    def close(self) -> None: ...
+
 
 class LMStudioError(RuntimeError):
+    pass
+
+
+class OllamaError(RuntimeError):
     pass
 
 
@@ -73,10 +86,10 @@ class LMStudioClient:
     def close(self) -> None:
         self._client.close()
 
-    def __enter__(self) -> "LMStudioClient":
+    def __enter__(self) -> LMStudioClient:
         return self
 
-    def __exit__(self, *exc) -> None:  # pragma: no cover
+    def __exit__(self, *exc: object) -> None:  # pragma: no cover
         self.close()
 
     def complete_json(
@@ -131,6 +144,101 @@ class LMStudioClient:
         except (KeyError, IndexError, TypeError) as exc:
             raise LMStudioError(f"unexpected response shape: {data!r}") from exc
         return _parse_json_strict(content)
+
+
+class OllamaClient:
+    """Sync HTTP client for Ollama's native chat endpoint."""
+
+    def __init__(
+        self,
+        *,
+        base_url: str,
+        model: str,
+        api_key: str = "",
+        timeout_s: float = 120.0,
+        temperature: float = 0.0,
+        top_p: float = 1.0,
+        max_tokens: int = 2048,
+        use_json_schema_response: bool = True,
+        repeat_penalty: float = 1.0,
+        keep_alive: str = "30m",
+        http_client: httpx.Client | None = None,
+    ) -> None:
+        self._base_url = base_url.rstrip("/")
+        self._model = model
+        self._api_key = api_key
+        self._temperature = temperature
+        self._top_p = top_p
+        self._max_tokens = max_tokens
+        self._use_schema = use_json_schema_response
+        self._repeat_penalty = repeat_penalty
+        self._keep_alive = keep_alive
+        self._client = http_client or httpx.Client(timeout=timeout_s)
+
+    def close(self) -> None:
+        self._client.close()
+
+    def __enter__(self) -> OllamaClient:
+        return self
+
+    def __exit__(self, *exc: object) -> None:  # pragma: no cover
+        self.close()
+
+    def complete_json(
+        self,
+        *,
+        messages: Iterable[LLMChatMessage],
+        json_schema: dict[str, Any] | None,
+        schema_name: str = "PlannerProposal",
+    ) -> dict[str, Any]:
+        del schema_name
+        options: dict[str, Any] = {
+            "temperature": self._temperature,
+            "top_p": self._top_p,
+            "num_predict": self._max_tokens,
+        }
+        if self._repeat_penalty != 1.0:
+            options["repeat_penalty"] = self._repeat_penalty
+
+        payload: dict[str, Any] = {
+            "model": self._model,
+            "messages": [{"role": m.role, "content": m.content} for m in messages],
+            "stream": False,
+            "options": options,
+        }
+        if self._keep_alive:
+            payload["keep_alive"] = self._keep_alive
+        if json_schema is not None and self._use_schema:
+            payload["format"] = json_schema
+        elif json_schema is not None:
+            payload["format"] = "json"
+
+        url = f"{self._base_url}/api/chat"
+        headers = {"Content-Type": "application/json"}
+        if self._api_key:
+            headers["Authorization"] = f"Bearer {self._api_key}"
+        try:
+            response = self._client.post(url, headers=headers, json=payload)
+        except httpx.HTTPError as exc:
+            raise OllamaError(f"transport error talking to {url}: {exc}") from exc
+        if response.status_code >= 400:
+            raise OllamaError(f"Ollama returned {response.status_code}: {response.text[:500]}")
+        try:
+            data = response.json()
+        except ValueError as exc:
+            raise OllamaError(f"non-JSON response from Ollama: {response.text[:500]}") from exc
+        try:
+            content = data["message"]["content"]
+        except (KeyError, TypeError) as exc:
+            raise OllamaError(f"unexpected response shape: {data!r}") from exc
+        if isinstance(content, dict):
+            return content
+        if not isinstance(content, str):
+            raise OllamaError(f"Ollama message content is not text/JSON: {content!r}")
+        try:
+            return _parse_json_strict(content)
+        except LMStudioError as exc:
+            raise OllamaError(str(exc)) from exc
 
 
 def _parse_json_strict(content: str) -> dict[str, Any]:
@@ -217,6 +325,9 @@ class OfflineCannedClient:
     @property
     def sent_messages(self) -> list[list[LLMChatMessage]]:
         return self._sent
+
+    def close(self) -> None:
+        return None
 
     def complete_json(
         self,

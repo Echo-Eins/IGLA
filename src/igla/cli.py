@@ -24,22 +24,11 @@ from .config import IglaSettings, load_settings
 from .console_io import attach_utf8_buffer, force_utf8_stdio
 from .kernel.kernel import Kernel
 from .motivation.rule import load_rules
-from .planner.llm_client import LMStudioClient
+from .planner.llm_client import LLMClient, LMStudioClient, OllamaClient
 from .policies.constitution import load_constitution
 from .protocol.task import TaskStatus
 from .state_reset import StateResetError, reset_workspace_state
-from .tools.builtin import (
-    AskUserTool,
-    FindFilesTool,
-    ListDirTool,
-    NoopObserveTool,
-    PatchFileTool,
-    ReadFileTool,
-    ReadTaskLogTool,
-    RestoreFileTool,
-    SearchTextTool,
-    VerifyFileTool,
-)
+from .tools.builtin import build_default_toolset
 
 
 def _build_settings(args: argparse.Namespace) -> IglaSettings:
@@ -47,22 +36,55 @@ def _build_settings(args: argparse.Namespace) -> IglaSettings:
     settings = load_settings(workspace)
     overrides: dict[str, object] = {}
     lm_overrides: dict[str, object] = {}
-    if args.lm_url:
+    ollama_overrides: dict[str, object] = {}
+    provider = getattr(args, "llm_provider", None) or settings.llm_provider
+    if getattr(args, "model", None):
+        if provider == "ollama":
+            ollama_overrides["model"] = args.model
+        else:
+            lm_overrides["model"] = args.model
+    if getattr(args, "lm_url", None):
         lm_overrides["base_url"] = args.lm_url
-    if args.lm_model:
+    if getattr(args, "lm_model", None):
         lm_overrides["model"] = args.lm_model
-    if args.lm_key:
+    if getattr(args, "lm_key", None):
         lm_overrides["api_key"] = args.lm_key
-    if args.no_schema:
+    if getattr(args, "no_schema", False):
         lm_overrides["use_json_schema_response"] = False
+        ollama_overrides["use_json_schema_response"] = False
+    if getattr(args, "ollama_url", None):
+        ollama_overrides["base_url"] = args.ollama_url
+    if getattr(args, "ollama_model", None):
+        ollama_overrides["model"] = args.ollama_model
+    if getattr(args, "ollama_key", None):
+        ollama_overrides["api_key"] = args.ollama_key
+    if getattr(args, "ollama_keep_alive", None):
+        ollama_overrides["keep_alive"] = args.ollama_keep_alive
+    if getattr(args, "llm_provider", None):
+        overrides["llm_provider"] = args.llm_provider
     if lm_overrides:
         overrides["lm_studio"] = settings.lm_studio.model_copy(update=lm_overrides)
+    if ollama_overrides:
+        overrides["ollama"] = settings.ollama.model_copy(update=ollama_overrides)
     if overrides:
         settings = settings.model_copy(update=overrides)
     return settings
 
 
-def _make_llm(settings: IglaSettings) -> LMStudioClient:
+def _make_llm(settings: IglaSettings) -> LLMClient:
+    if settings.llm_provider == "ollama":
+        return OllamaClient(
+            base_url=settings.ollama.base_url,
+            api_key=settings.ollama.api_key,
+            model=settings.ollama.model,
+            timeout_s=settings.ollama.request_timeout_s,
+            temperature=settings.ollama.temperature,
+            top_p=settings.ollama.top_p,
+            max_tokens=settings.ollama.max_tokens,
+            use_json_schema_response=settings.ollama.use_json_schema_response,
+            repeat_penalty=settings.ollama.repeat_penalty,
+            keep_alive=settings.ollama.keep_alive,
+        )
     return LMStudioClient(
         base_url=settings.lm_studio.base_url,
         api_key=settings.lm_studio.api_key,
@@ -133,12 +155,19 @@ def cmd_rich_chat(args: argparse.Namespace) -> int:
 def cmd_doctor(args: argparse.Namespace) -> int:
     settings = _build_settings(args)
     console = Console()
+    json_schema_enabled = (
+        settings.ollama.use_json_schema_response
+        if settings.llm_provider == "ollama"
+        else settings.lm_studio.use_json_schema_response
+    )
     console.print(
         Panel(
             f"workspace: {settings.paths.workspace}\n"
             f"state_dir: {settings.paths.state_dir}\n"
+            f"llm_provider: {settings.llm_provider}\n"
             f"LM Studio: {settings.lm_studio.base_url} ({settings.lm_studio.model})\n"
-            f"json_schema: {settings.lm_studio.use_json_schema_response}",
+            f"Ollama: {settings.ollama.base_url} ({settings.ollama.model})\n"
+            f"json_schema: {json_schema_enabled}",
             title="settings",
             border_style="blue",
         )
@@ -170,33 +199,13 @@ def cmd_doctor(args: argparse.Namespace) -> int:
             return ""
 
     kernel.registry.register_many(
-        [
-            AskUserTool(channel=_DummyAsk()),
-            FindFilesTool(workspace_root=str(settings.paths.workspace)),
-            ListDirTool(workspace_root=str(settings.paths.workspace)),
-            ReadFileTool(
-                workspace_root=str(settings.paths.workspace),
-                receipts=kernel.receipts,
-            ),
-            SearchTextTool(workspace_root=str(settings.paths.workspace)),
-            PatchFileTool(
-                workspace_root=str(settings.paths.workspace),
-                receipts=kernel.receipts,
-                rollback=kernel.rollback,
-            ),
-            RestoreFileTool(
-                workspace_root=str(settings.paths.workspace),
-                receipts=kernel.receipts,
-                rollback=kernel.rollback,
-            ),
-            VerifyFileTool(
-                workspace_root=str(settings.paths.workspace),
-                receipts=kernel.receipts,
-            ),
-            ReadTaskLogTool(work_log=kernel.work_log),
-
-            NoopObserveTool(),
-        ]
+        build_default_toolset(
+            ask_user_channel=_DummyAsk(),
+            workspace_root=str(settings.paths.workspace),
+            receipts=kernel.receipts,
+            rollback=kernel.rollback,
+            work_log=kernel.work_log,
+        )
     )
     table = Table(title="registered tools")
     table.add_column("name")
@@ -222,9 +231,19 @@ def cmd_version(args: argparse.Namespace) -> int:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="igla", description="IGLA action runtime")
     parser.add_argument("--workspace", help="Workspace root (default: $IGLA_WORKSPACE or CWD)")
+    parser.add_argument(
+        "--llm-provider",
+        choices=["lmstudio", "ollama"],
+        help="LLM backend provider (default: $IGLA_LLM_PROVIDER or lmstudio)",
+    )
+    parser.add_argument("--model", help="Model name for the selected provider")
     parser.add_argument("--lm-url", help="LM Studio base URL (e.g. http://127.0.0.1:1234/v1)")
     parser.add_argument("--lm-model", help="LM Studio model name")
     parser.add_argument("--lm-key", help="LM Studio API key (default: 'lm-studio')")
+    parser.add_argument("--ollama-url", help="Ollama base URL (default: http://127.0.0.1:11434)")
+    parser.add_argument("--ollama-model", help="Ollama model name from `ollama list`")
+    parser.add_argument("--ollama-key", help="Optional Ollama API key for non-local endpoints")
+    parser.add_argument("--ollama-keep-alive", help="Ollama keep_alive value (default: 30m)")
     parser.add_argument(
         "--no-schema",
         action="store_true",

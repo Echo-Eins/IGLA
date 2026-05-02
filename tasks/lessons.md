@@ -117,3 +117,28 @@ Failure-diagnosis mode needs explicit recovery exits for known recoverable
 planning errors. A large-file unbounded read followed by a successful chunked
 `read_file` should return the task to `READY`; otherwise `declare_task_done`
 stays forbidden after the model has already corrected its read strategy.
+
+## 2026-05-01: File creation/copy is not file patching
+
+Do not force a local model to synthesize full file contents when the desired
+operation is structural: copy file A to file B, append a small suffix, move a
+file, or create a new file from an existing source. Those operations need
+dedicated tools that move bytes inside the runtime. Using `patch_file` with
+`new_content` for a large copy is both inefficient and unsafe.
+
+`patch_file` should remain an existing-file editor with read-before-write and
+hash-before-patch invariants. A non-existent destination cannot satisfy a prior
+`read_file` receipt, so creation/copy flows need a separate tool such as
+`copy_file` with explicit destination-exists behavior and rollback for
+overwrites.
+
+## 2026-05-01: Keep LLM backends swappable
+
+The planner should depend on a narrow `LLMClient` protocol, not on one local
+server implementation. LM Studio's OpenAI-compatible chat endpoint is useful
+as a fallback, but native backends such as Ollama may expose different and
+more reliable structured-output controls.
+
+Backend selection must be explicit in config/CLI/env, and model names must be
+opaque strings owned by the backend. For Ollama, accept any model tag the user
+can see in `ollama list`; do not hard-code a local model catalog in IGLA.

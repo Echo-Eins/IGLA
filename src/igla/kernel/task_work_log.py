@@ -219,6 +219,18 @@ def _summarise_tool_output(tool_name: str, output: dict[str, Any]) -> dict[str, 
     "what did I do".
     """
     name = tool_name.lower()
+    if name == "copy_file":
+        return _pick(
+            output,
+            [
+                "source_path",
+                "destination_path",
+                "bytes_written",
+                "appended_bytes",
+                "sha256_after",
+                "overwrote",
+            ],
+        )
     if name == "patch_file":
         return _pick(output, ["path", "patch_mode", "occurrences_replaced", "sha256_after"])
     if name == "restore_file":
@@ -278,3 +290,8 @@ def _collect_file_paths(payload: dict[str, Any], sink: set[str]) -> None:
         path = out.get("path")
         if isinstance(path, str):
             sink.add(path)
+    if name == "copy_file":
+        for key in ("source_path", "destination_path"):
+            path = out.get(key)
+            if isinstance(path, str):
+                sink.add(path)

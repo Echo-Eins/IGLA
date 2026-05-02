@@ -7,9 +7,11 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from typing import Literal
+from typing import Literal, cast
 
 from pydantic import BaseModel, ConfigDict, Field
+
+LLMProvider = Literal["lmstudio", "ollama"]
 
 
 class LMStudioSettings(BaseModel):
@@ -32,6 +34,23 @@ class LMStudioSettings(BaseModel):
     repeat_penalty: float = 1.05
 
 
+class OllamaSettings(BaseModel):
+    """Configuration for Ollama's native ``/api/chat`` endpoint."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    base_url: str = "http://127.0.0.1:11434"
+    api_key: str = ""
+    model: str = "llama3.1:8b"
+    request_timeout_s: float = 120.0
+    temperature: float = 0.15
+    top_p: float = 1.0
+    max_tokens: int = 4096
+    use_json_schema_response: bool = True
+    repeat_penalty: float = 1.05
+    keep_alive: str = "30m"
+
+
 class PathsSettings(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
@@ -45,7 +64,7 @@ class PathsSettings(BaseModel):
     motivation_file: Path
 
     @classmethod
-    def from_workspace(cls, workspace: Path, *, package_root: Path) -> "PathsSettings":
+    def from_workspace(cls, workspace: Path, *, package_root: Path) -> PathsSettings:
         state_dir = (workspace / ".igla").resolve()
         configs = (package_root / "configs").resolve()
         return cls(
@@ -72,7 +91,9 @@ class IglaSettings(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     paths: PathsSettings
+    llm_provider: LLMProvider = "lmstudio"
     lm_studio: LMStudioSettings = Field(default_factory=LMStudioSettings)
+    ollama: OllamaSettings = Field(default_factory=OllamaSettings)
     planner: PlannerSettings = Field(default_factory=PlannerSettings)
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = "INFO"
 
@@ -86,9 +107,22 @@ def load_settings(workspace: Path | None = None) -> IglaSettings:
     """Build settings from CWD/env. No global mutable state."""
     ws = workspace or Path(os.environ.get("IGLA_WORKSPACE", os.getcwd())).resolve()
     paths = PathsSettings.from_workspace(ws, package_root=package_root())
+    provider = os.environ.get("IGLA_LLM_PROVIDER", "lmstudio").strip().lower()
+    if provider not in {"lmstudio", "ollama"}:
+        provider = "lmstudio"
     lm = LMStudioSettings(
         base_url=os.environ.get("IGLA_LMSTUDIO_URL", "http://127.0.0.1:1234/v1"),
         api_key=os.environ.get("IGLA_LMSTUDIO_KEY", "lm-studio"),
         model=os.environ.get("IGLA_LMSTUDIO_MODEL", "local-model"),
     )
-    return IglaSettings(paths=paths, lm_studio=lm)
+    ollama = OllamaSettings(
+        base_url=os.environ.get("IGLA_OLLAMA_URL", "http://127.0.0.1:11434"),
+        api_key=os.environ.get("IGLA_OLLAMA_KEY", ""),
+        model=os.environ.get("IGLA_OLLAMA_MODEL", "llama3.1:8b"),
+    )
+    return IglaSettings(
+        paths=paths,
+        llm_provider=cast(LLMProvider, provider),
+        lm_studio=lm,
+        ollama=ollama,
+    )

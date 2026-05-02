@@ -156,6 +156,24 @@ def test_work_log_summarises_current_discovery_output_shapes(tmp_path) -> None:
             },
         },
     )
+    events.append(
+        kind=EventKind.TOOL_INVOCATION_COMPLETED,
+        actor="tool:copy_file",
+        task_id="task_test",
+        payload={
+            "tool_name": "copy_file",
+            "status": "success",
+            "output_keys": ["source_path", "destination_path"],
+            "output": {
+                "source_path": "/workspace/README.md",
+                "destination_path": "/workspace/README1.md",
+                "bytes_written": 16,
+                "appended_bytes": 6,
+                "sha256_after": "sha256:dest",
+                "overwrote": False,
+            },
+        },
+    )
 
     entries = TaskWorkLog(events).get_entries("task_test")
 
@@ -167,4 +185,11 @@ def test_work_log_summarises_current_discovery_output_shapes(tmp_path) -> None:
         "count": 1,
         "first_matches": [{"relative_path": "README.md", "line_number": 12}],
     }
-
+    assert entries[2]["output_summary"] == {
+        "source_path": "/workspace/README.md",
+        "destination_path": "/workspace/README1.md",
+        "bytes_written": 16,
+        "appended_bytes": 6,
+        "sha256_after": "sha256:dest",
+        "overwrote": False,
+    }

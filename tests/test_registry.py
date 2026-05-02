@@ -100,6 +100,7 @@ def test_build_default_toolset_includes_verifier_and_task_log(tmp_path) -> None:
     )
 
     names = {tool.manifest.name for tool in tools}
+    assert "copy_file" in names
     assert "verify_file" in names
     assert "read_task_log" in names
     assert "patch_file" in names

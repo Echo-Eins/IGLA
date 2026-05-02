@@ -838,6 +838,20 @@ def _compact_tool_output(tool_name: str, output: dict[str, Any]) -> dict[str, An
             "file_sha256": output.get("file_sha256"),
             "receipt_id": output.get("receipt_id"),
         }
+    if tool_name == "copy_file":
+        return {
+            "source_path": output.get("source_path"),
+            "destination_path": output.get("destination_path"),
+            "bytes_source": output.get("bytes_source"),
+            "bytes_written": output.get("bytes_written"),
+            "appended_bytes": output.get("appended_bytes"),
+            "sha256_source": output.get("sha256_source"),
+            "sha256_after": output.get("sha256_after"),
+            "overwrote": output.get("overwrote"),
+            "backup_artifact_id": output.get("backup_artifact_id"),
+            "rollback_plan_id": output.get("rollback_plan_id"),
+            "receipt_id": output.get("receipt_id"),
+        }
     if tool_name == "verify_file":
         results = [
             {

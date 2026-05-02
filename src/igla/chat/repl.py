@@ -18,11 +18,11 @@ Hard rules:
 """
 from __future__ import annotations
 
+import contextlib
+import traceback as _tb
 from collections.abc import Iterable
 from dataclasses import dataclass, field
 from datetime import datetime
-from pathlib import Path
-from typing import Any
 
 from rich.console import Console
 from rich.panel import Panel
@@ -38,14 +38,16 @@ from ..planner.llm_client import LLMClient
 from ..planner.planner import Planner, PlannerOutcome
 from ..policies.constitution import load_constitution
 from ..policies.engine import PolicyContext, PolicyEngine
+from ..protocol.event import EventRecord
 from ..protocol.task import TaskSpec, TaskStatus
-from ..protocol.todo import TodoStatus
+from ..protocol.todo import TodoNode, TodoStatus
 from ..todo.render import render_text
 from ..todo.store import TodoStore
 from ..todo.tree import TodoTree
 from ..tools.builtin import (
     AskUserChannel,
     AskUserTool,
+    CopyFileTool,
     FindFilesTool,
     ListDirTool,
     NoopObserveTool,
@@ -90,10 +92,8 @@ def _prompt_line(console: Console, prompt_markup: str) -> str:
         raise
     except UnicodeError:
         # Rich is unable to decode the byte stream — degrade gracefully.
-        try:
+        with contextlib.suppress(Exception):
             console.print(prompt_markup, end="")
-        except Exception:  # noqa: BLE001
-            pass
         return safe_readline()
 
 
@@ -149,6 +149,11 @@ class ChatREPL:
             receipts=self._kernel.receipts,
         )
         search_tool = SearchTextTool(workspace_root=str(settings.paths.workspace))
+        copy_tool = CopyFileTool(
+            workspace_root=str(settings.paths.workspace),
+            receipts=self._kernel.receipts,
+            rollback=self._kernel.rollback,
+        )
         patch_tool = PatchFileTool(
             workspace_root=str(settings.paths.workspace),
             receipts=self._kernel.receipts,
@@ -173,6 +178,7 @@ class ChatREPL:
                 list_dir_tool,
                 read_tool,
                 search_tool,
+                copy_tool,
                 patch_tool,
                 restore_tool,
                 verify_tool,
@@ -255,8 +261,6 @@ class ChatREPL:
         try:
             outcome = self._planner.run_task(task, todo)
         except Exception as exc:  # noqa: BLE001 — protect the chat session
-            import traceback as _tb
-
             self._console.print(
                 Panel(
                     f"{exc}\n\n[dim]{_tb.format_exc()}[/dim]",
@@ -302,14 +306,14 @@ class ChatREPL:
 
         self._render_finish(outcome, todo)
 
-    def _latest_clarifying(self, todo: TodoTree):
+    def _latest_clarifying(self, todo: TodoTree) -> TodoNode | None:
         nodes = [n for n in todo.all_nodes() if n.status is TodoStatus.CLARIFYING]
         if not nodes:
             return None
         nodes.sort(key=lambda n: n.updated_at, reverse=True)
         return nodes[0]
 
-    def _render_finish(self, outcome: PlannerOutcome, todo) -> None:
+    def _render_finish(self, outcome: PlannerOutcome, todo: TodoTree) -> None:
         title = {
             TaskStatus.DONE: "✓ done",
             TaskStatus.ABORTED: "✕ aborted",
@@ -393,7 +397,7 @@ class ChatREPL:
         )
 
 
-def _ts_iter(events: Iterable) -> list[datetime]:  # pragma: no cover - reserved
+def _ts_iter(events: Iterable[EventRecord]) -> list[datetime]:  # pragma: no cover - reserved
     return [e.timestamp for e in events]
 
 

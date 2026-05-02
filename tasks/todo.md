@@ -198,6 +198,51 @@
 - Verified changed files with focused `ruff check`: clean.
 - Verified changed source files with focused `mypy`: clean.
 
+# Bugfix: copy new files without synthesizing full content in the LLM
+
+- [x] Capture the transfer-note failure mode.
+- [x] Add a workspace-bounded `copy_file` tool for source-to-destination copies with optional append text.
+- [x] Register `copy_file` in all runtime toolsets and planner examples.
+- [x] Expose compact `copy_file` output / work-log summaries.
+- [x] Add regressions for copy, destination safety, tool registration, and planner-visible output.
+- [x] Verify tests and document review.
+
+## Review
+
+- Fresh transfer note shows a new failure mode: after a user asked to copy `README.md` to `README1.md` and append `hello`, the planner tried to use `patch_file` with `new_content` for a non-existent destination. Policy correctly denied it with `MUST_READ_BEFORE_WRITE`, because `patch_file` is for existing files and requires a prior read receipt of the same target path.
+- Added `copy_file` as the correct primitive for this operation: workspace-bounded source/destination, optional `append_text`, no overwrite by default, `overwrite=true` creates a rollback snapshot before replacing an existing destination.
+- `copy_file` records a destination read receipt after writing, so follow-up verification or patching has a current `file_sha256`.
+- Registered `copy_file` in the default toolset, plain CLI, and Rich REPL.
+- Updated planner hard rules and tool examples: creating a copy must use `copy_file`, not full-file `patch_file.new_content`.
+- Added compact planner output and TaskWorkLog summaries for `copy_file`.
+- Added regressions for copy+append, destination safety, overwrite backup, workspace escape denial, default registration, planner compact output, work-log summary, and a planner flow that creates `README1.md`.
+- Verified with `pytest tests/`: 227 passed.
+- Verified changed files with focused `ruff check`: clean.
+- Verified changed source files with focused `mypy`: clean.
+
+# Feature: Ollama LLM backend
+
+- [x] Capture requirement: native Ollama localhost API with arbitrary model name from `ollama list`.
+- [x] Add config/env/CLI provider selection without removing LM Studio fallback.
+- [x] Implement `OllamaClient` on `/api/chat` with `stream=false` and schema/json format.
+- [x] Wire client factory and doctor output.
+- [x] Add tests for request payload, response parsing, and CLI settings.
+- [x] Verify tests and document review.
+
+## Review
+
+- Added `llm_provider` settings with `lmstudio` as the default and `ollama` as an opt-in backend.
+- Added `OllamaSettings`: `base_url`, `model`, optional `api_key`, generation options, `use_json_schema_response`, `repeat_penalty`, and `keep_alive`.
+- Implemented `OllamaClient` using native `POST <base_url>/api/chat`, `stream=false`, `messages`, `options`, and `format` as either JSON Schema or `"json"` fallback.
+- Added CLI/env selection:
+  - CLI: `--llm-provider ollama --ollama-model <name>` or generic `--model <name>` when provider is Ollama.
+  - Env: `IGLA_LLM_PROVIDER=ollama`, `IGLA_OLLAMA_URL`, `IGLA_OLLAMA_MODEL`, `IGLA_OLLAMA_KEY`.
+- `doctor` now prints the selected provider and both backend endpoints/models.
+- Added tests for Ollama request payload, schema/json format modes, HTTP errors, CLI overrides, and env loading.
+- Verified with `pytest tests/`: 234 passed.
+- Verified changed files with focused `ruff check`: clean.
+- Verified changed source files with focused `mypy`: clean.
+
 # Bugfix: stop read_file chunk loops
 
 - [x] Capture the transfer-note loop pattern.

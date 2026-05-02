@@ -9,6 +9,7 @@ from .llm_client import (
     LLMClient,
     LMStudioClient,
     OfflineCannedClient,
+    OllamaClient,
 )
 from .planner import Planner, PlannerOutcome
 from .prompts import (
@@ -24,6 +25,7 @@ __all__ = [
     "LLMClient",
     "LMStudioClient",
     "OfflineCannedClient",
+    "OllamaClient",
     "Planner",
     "PlannerOutcome",
     "build_proposal_messages",

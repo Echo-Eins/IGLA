@@ -94,6 +94,9 @@ SESSION_HARD_RULES: tuple[str, ...] = (
     "После ошибки tool ты в режиме FAILURE_DIAGNOSIS_REQUIRED. Запрещено "
     "вслепую повторять тот же класс действий. Сначала диагностика "
     "(list_dir / find_files / search_text / read_file), потом другая попытка.",
+    "Для задачи 'создай копию файла / скопируй файл в новый путь / допиши текст "
+    "к копии' используй copy_file. НЕ собирай большой файл в patch_file.new_content "
+    "и НЕ используй patch_file для создания несуществующего файла.",
     "patch_file требует обязательной последовательности: сначала read_file "
     "того же пути, затем patch_file с base_sha256=<file_sha256 из read_file>. "
     "Без свежего read_file политика отклонит patch (MUST_READ_BEFORE_WRITE / "
@@ -197,6 +200,40 @@ TOOL_USAGE_EXAMPLES: dict[str, list[dict[str, Any]]] = {
                 "Продолжать пока end_of_file=false."
             ),
             "input": {"path": "src/igla/planner/planner.py", "start_line": 1000, "end_line": 2000},
+        },
+    ],
+    "copy_file": [
+        {
+            "intent": (
+                "Создать копию файла в новом пути. Используй это вместо patch_file, "
+                "когда destination ещё не существует."
+            ),
+            "input": {
+                "source_path": "README.md",
+                "destination_path": "README1.md",
+            },
+        },
+        {
+            "intent": (
+                "Скопировать файл и дописать текст в конец копии, не протаскивая "
+                "весь исходный файл через LLM context."
+            ),
+            "input": {
+                "source_path": "README.md",
+                "destination_path": "README1.md",
+                "append_text": "\nhello\n",
+            },
+        },
+        {
+            "intent": (
+                "Заменить существующую копию только если это явно нужно. "
+                "overwrite=true создаёт backup перед заменой."
+            ),
+            "input": {
+                "source_path": "README.md",
+                "destination_path": "README1.md",
+                "overwrite": True,
+            },
         },
     ],
     "patch_file": [
