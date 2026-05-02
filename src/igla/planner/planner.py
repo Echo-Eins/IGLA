@@ -827,8 +827,15 @@ def _compact_tool_output(tool_name: str, output: dict[str, Any]) -> dict[str, An
         return {
             "path": output.get("path"),
             "bytes_read": output.get("bytes_read"),
-            "truncated": bool(output.get("truncated", False)) or len(content) > 4000,
+            "start_line": output.get("start_line"),
+            "end_line": output.get("end_line"),
+            "total_lines": output.get("total_lines"),
+            "end_of_file": output.get("end_of_file"),
+            "truncated": bool(output.get("truncated", False)),
+            "content_excerpt_truncated": len(content) > 4000,
             "content_excerpt": _truncate_text(content, 4000),
+            "sha256": output.get("sha256"),
+            "file_sha256": output.get("file_sha256"),
             "receipt_id": output.get("receipt_id"),
         }
     if tool_name == "verify_file":

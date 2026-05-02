@@ -51,7 +51,7 @@ def _runtime_mode_is(ctx: ConditionContext) -> bool:
     expected = ctx.rule_args.get("mode")
     if not expected:
         raise ValueError("runtime_mode_is requires args.mode")
-    return ctx.task_state.mode == RuntimeMode(expected)
+    return bool(ctx.task_state.mode == RuntimeMode(expected))
 
 
 def _runtime_mode_in(ctx: ConditionContext) -> bool:
@@ -91,7 +91,7 @@ def _payload_equals(ctx: ConditionContext) -> bool:
         if not isinstance(actual, dict) or part not in actual:
             return False
         actual = actual[part]
-    return actual == expected
+    return bool(actual == expected)
 
 
 def _payload_in(ctx: ConditionContext) -> bool:
@@ -104,7 +104,7 @@ def _payload_in(ctx: ConditionContext) -> bool:
         if not isinstance(actual, dict) or part not in actual:
             return False
         actual = actual[part]
-    return actual in values
+    return bool(actual in values)
 
 
 def _tool_called_was(ctx: ConditionContext) -> bool:
@@ -112,14 +112,21 @@ def _tool_called_was(ctx: ConditionContext) -> bool:
     expected = ctx.rule_args.get("name")
     if not expected:
         raise ValueError("tool_called_was requires args.name")
-    return ctx.event.payload.get("tool_name") == expected
+    return bool(ctx.event.payload.get("tool_name") == expected)
 
 
 def _result_status_was(ctx: ConditionContext) -> bool:
     expected = ctx.rule_args.get("status")
     if not expected:
         raise ValueError("result_status_was requires args.status")
-    return ctx.event.payload.get("status") == expected
+    return bool(ctx.event.payload.get("status") == expected)
+
+
+def _last_error_code_in(ctx: ConditionContext) -> bool:
+    codes = set(ctx.rule_args.get("codes") or [])
+    if not codes:
+        raise ValueError("last_error_code_in requires args.codes")
+    return ctx.task_state.last_error_code in codes
 
 
 for _name, _fn in [
@@ -133,5 +140,6 @@ for _name, _fn in [
     ("payload_in", _payload_in),
     ("tool_called_was", _tool_called_was),
     ("result_status_was", _result_status_was),
+    ("last_error_code_in", _last_error_code_in),
 ]:
     register_condition(_name, _fn)

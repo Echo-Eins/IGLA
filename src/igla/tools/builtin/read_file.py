@@ -2,9 +2,11 @@
 
 The tool reads a text file inside the configured workspace and emits a
 ``FileReadReceipt``.  For large files the caller MUST supply an explicit line
-range (``start_line`` / ``end_line``); without a range the tool refuses files
-longer than ``_LINE_LIMIT`` and returns a ``FILE_TOO_LARGE`` error with an
-iterative-read hint so the model knows exactly how to proceed.
+range or at least a ``start_line``.  A start-line-only request returns the next
+``_LINE_LIMIT`` lines, which makes iterative reading robust when a local model
+omits the exclusive ``end_line``.  Without any range signal the tool refuses
+files longer than ``_LINE_LIMIT`` and returns a ``FILE_TOO_LARGE`` error with
+an iterative-read hint so the model knows exactly how to proceed.
 
 The output exposes two distinct hashes:
 
@@ -65,10 +67,12 @@ _INPUT_SCHEMA = {
             "minimum": 1,
             "description": (
                 f"Last line to return (exclusive end, like Python slicing). "
-                f"If omitted and the file has ≤{_LINE_LIMIT} lines the whole file is "
-                f"returned. If omitted and the file is larger the call fails with "
-                f"FILE_TOO_LARGE — use start_line/end_line to read iteratively in "
-                f"chunks (e.g. 0/{_LINE_LIMIT}, then {_LINE_LIMIT}/{_LINE_LIMIT*2}, …)."
+                f"If omitted and the file has at most {_LINE_LIMIT} lines the whole "
+                f"file is returned. If omitted with start_line on a larger file, "
+                f"read_file returns up to {_LINE_LIMIT} lines from start_line. If "
+                f"omitted without start_line on a larger file, the call fails with "
+                f"FILE_TOO_LARGE; use start_line/end_line to read iteratively in "
+                f"chunks (e.g. 0/{_LINE_LIMIT}, then {_LINE_LIMIT}/{_LINE_LIMIT*2})."
             ),
         },
     },
@@ -130,8 +134,9 @@ class ReadFileTool(Tool):
                 description=(
                     "Read a workspace-bounded text file. "
                     "For files longer than 1000 lines supply start_line and end_line "
-                    "to read iteratively; omitting the range on a large file returns "
-                    "FILE_TOO_LARGE with the total line count and an iterative-read hint."
+                    "to read iteratively. If end_line is omitted with start_line, the "
+                    "tool returns the next safe chunk; omitting the whole range on a "
+                    "large file returns FILE_TOO_LARGE with an iterative-read hint."
                 ),
                 capabilities=["fs.read", "core.read_file"],
                 risk_level="read_only",
@@ -150,6 +155,7 @@ class ReadFileTool(Tool):
 
     def invoke(self, invocation: ToolInvocation) -> ToolResult:
         raw_path = str(invocation.input["path"])
+        has_start_line = "start_line" in invocation.input
         start_line = int(invocation.input.get("start_line", 0))
         end_line_req = invocation.input.get("end_line")  # None = caller did not set
 
@@ -191,8 +197,9 @@ class ReadFileTool(Tool):
         all_lines = text.splitlines()
         total_lines = len(all_lines)
 
-        # No range given on a large file → structured error with iterative hint
-        if end_line_req is None and total_lines > _LINE_LIMIT:
+        # No range signal on a large file -> structured error with iterative hint.
+        # If start_line is present, use it as a request for the next safe chunk.
+        if end_line_req is None and total_lines > _LINE_LIMIT and not has_start_line:
             return _failure(
                 invocation,
                 code="FILE_TOO_LARGE",
@@ -208,7 +215,10 @@ class ReadFileTool(Tool):
         # Resolve the actual slice
         actual_start = max(0, min(start_line, total_lines))
         if end_line_req is None:
-            actual_end = total_lines
+            if has_start_line and total_lines > _LINE_LIMIT:
+                actual_end = min(actual_start + _LINE_LIMIT, total_lines)
+            else:
+                actual_end = total_lines
         else:
             actual_end = max(actual_start, min(int(end_line_req), total_lines))
 

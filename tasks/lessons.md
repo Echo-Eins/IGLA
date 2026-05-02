@@ -89,3 +89,31 @@ do not help the model find missing information.
 When tests assert file hashes or backup bytes, write fixture files as bytes or
 force LF newlines. Otherwise Windows CRLF translation can hide platform
 assumptions in a Linux-first project.
+
+## 2026-05-01: Preserve progress metadata separately from prompt compaction
+
+Do not conflate prompt-size compaction with tool semantics. If a tool returns
+`truncated=false`, the compact event tail must not rewrite it to `true` merely
+because the prompt excerpt was shortened. Use a separate field such as
+`content_excerpt_truncated` for prompt-only shortening.
+
+For iterative tools, always carry the progress cursor in the compact output.
+For `read_file`, the planner must see `start_line`, `end_line`, `total_lines`,
+and `end_of_file` after every successful read. Dropping those fields makes a
+weak local model reread the same ranges and look like it is "thinking" when the
+runtime actually removed the state it needed to advance.
+
+Tool APIs should be tolerant at the boundary when that preserves safe progress.
+For large-file reading, `read_file(start_line=N)` should mean "read the next
+safe chunk" instead of failing solely because `end_line` was omitted.
+
+Executor validation must distinguish success payload schemas from failure
+envelopes. A tool returning `status=failed` with a structured `error.code`
+should keep that original error; validating its empty output against the
+success schema rewrites useful causes like `FILE_TOO_LARGE` into generic
+`OUTPUT_SCHEMA_INVALID` and makes the planner diagnose the wrong thing.
+
+Failure-diagnosis mode needs explicit recovery exits for known recoverable
+planning errors. A large-file unbounded read followed by a successful chunked
+`read_file` should return the task to `READY`; otherwise `declare_task_done`
+stays forbidden after the model has already corrected its read strategy.

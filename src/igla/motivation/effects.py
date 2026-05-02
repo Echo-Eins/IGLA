@@ -112,6 +112,10 @@ def _clear_flags(ctx: EffectContext) -> None:
             setattr(ctx.task_state, flag, False)
 
 
+def _clear_last_error(ctx: EffectContext) -> None:
+    ctx.task_state.last_error_code = None
+
+
 def _log_message(ctx: EffectContext) -> None:
     message = str(ctx.rule_args.get("message", ""))
     ctx.kernel.events.append(
@@ -185,6 +189,7 @@ for _name, _fn in [
     ("clear_forbidden_actions", _clear_forbidden_actions),
     ("set_flag", _set_flag),
     ("clear_flags", _clear_flags),
+    ("clear_last_error", _clear_last_error),
     ("log_message", _log_message),
     ("pause_for_clarification", _pause_for_clarification),
     ("resume_from_clarification", _resume_from_clarification),

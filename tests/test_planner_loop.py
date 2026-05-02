@@ -10,6 +10,7 @@ from igla.ids import prefixed_id
 from igla.kernel.clock import StepClock
 from igla.motivation.effects import EFFECTS as _EFFECTS
 from igla.motivation.effects import EffectContext as _EffCtx
+from igla.planner.planner import _compact_tool_output
 from igla.protocol.event import EventKind
 from igla.protocol.runtime import RuntimeMode
 from igla.protocol.task import TaskSpec, TaskStatus
@@ -259,6 +260,35 @@ def test_discovery_output_is_visible_to_next_planner_turn(make_settings) -> None
     assert "matches" in rendered
 
 
+def test_read_file_compact_output_preserves_chunk_progress() -> None:
+    content = "x" * 5000
+    compact = _compact_tool_output(
+        "read_file",
+        {
+            "path": "/workspace/README.md",
+            "content": content,
+            "bytes_read": len(content),
+            "start_line": 1000,
+            "end_line": 2000,
+            "total_lines": 2500,
+            "end_of_file": False,
+            "truncated": False,
+            "sha256": "sha256:slice",
+            "file_sha256": "sha256:file",
+            "receipt_id": "receipt_1",
+        },
+    )
+
+    assert compact["start_line"] == 1000
+    assert compact["end_line"] == 2000
+    assert compact["total_lines"] == 2500
+    assert compact["end_of_file"] is False
+    assert compact["truncated"] is False
+    assert compact["content_excerpt_truncated"] is True
+    assert len(compact["content_excerpt"]) == 4000
+    assert compact["file_sha256"] == "sha256:file"
+
+
 def test_simple_find_file_task_finishes_after_find_files_result(make_settings) -> None:
     settings = make_settings()
     (settings.paths.workspace / "README.md").write_text("# Root\n", encoding="utf-8")
@@ -479,6 +509,60 @@ def test_open_file_flow_can_discover_then_read(make_settings) -> None:
         if e.kind is EventKind.TOOL_INVOCATION_COMPLETED
     ]
     assert [e.payload["tool_name"] for e in completed] == ["find_files", "read_file"]
+
+
+def test_large_read_recovers_from_file_too_large_and_allows_done(make_settings) -> None:
+    settings = make_settings()
+    (settings.paths.workspace / "README.md").write_text(
+        "\n".join(f"L{i}" for i in range(1500)),
+        encoding="utf-8",
+    )
+    canned = [
+        {
+            "action": "tool_invocation",
+            "tool_name": "read_file",
+            "tool_version": "1.0.0",
+            "input": {"path": "README.md"},
+            "reason": "Try to read the requested file.",
+        },
+        {
+            "action": "tool_invocation",
+            "tool_name": "read_file",
+            "tool_version": "1.0.0",
+            "input": {"path": "README.md", "start_line": 0},
+            "reason": "Recover by reading the first safe chunk.",
+        },
+        {
+            "action": "declare_task_done",
+            "summary": "read chunk",
+            "reason": "Large-file diagnosis was resolved.",
+        },
+    ]
+    planner, kernel, _, _, _ = build_runtime(
+        settings,
+        canned_responses=canned,
+        clock=StepClock(datetime(2026, 4, 29, tzinfo=UTC), step_seconds=0.1),
+    )
+    task = _new_task("read README.md", kernel)
+    todo = TodoTree(task.task_id, kernel.clock)
+    todo.create_root(title="read")
+
+    outcome = planner.run_task(task, todo)
+
+    assert outcome.status is TaskStatus.DONE
+    failures = [
+        e
+        for e in kernel.events.list_by_task(task.task_id)
+        if e.kind is EventKind.TOOL_INVOCATION_FAILED
+    ]
+    assert failures[0].payload["error_code"] == "FILE_TOO_LARGE"
+    completed = [
+        e
+        for e in kernel.events.list_by_task(task.task_id)
+        if e.kind is EventKind.TOOL_INVOCATION_COMPLETED
+    ]
+    assert completed[0].payload["output"]["end_line"] == 1000
+    assert completed[0].payload["output"]["end_of_file"] is False
 
 
 def test_policy_rejection_loops_until_max(make_settings) -> None:

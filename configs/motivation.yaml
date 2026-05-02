@@ -109,6 +109,42 @@ rules:
       - kind: log_message
         args: { message: "Entered FAILURE_DIAGNOSIS_REQUIRED" }
 
+  - id: exit_read_file_size_diagnosis_after_chunk_success
+    description: >
+      A large-file read without a range is a recoverable planning error, not
+      a permanent failure. After read_file succeeds in chunked form, return to
+      READY so the planner can continue reading chunks or declare completion.
+    priority: 35
+    triggers:
+      - on_event: tool_invocation_completed
+    conditions:
+      - kind: runtime_mode_is
+        args: { mode: failure_diagnosis_required }
+      - kind: tool_called_was
+        args: { name: read_file }
+      - kind: result_status_was
+        args: { status: success }
+      - kind: last_error_code_in
+        args: { codes: [FILE_TOO_LARGE] }
+    effects:
+      - kind: set_mode
+        args: { mode: ready }
+      - kind: clear_last_error
+      - kind: clear_flags
+        args:
+          flags: [failure_classified, changed_condition_declared]
+      - kind: set_allowed_actions
+        args:
+          actions:
+            - tool_invocation
+            - ask_user_clarification
+            - todo_branch
+            - todo_complete
+            - declare_task_done
+      - kind: clear_forbidden_actions
+      - kind: log_message
+        args: { message: "Recovered from large-file read diagnosis" }
+
   - id: exit_failure_diagnosis_when_classified
     description: >
       Leave failure diagnosis when the planner has classified the failure

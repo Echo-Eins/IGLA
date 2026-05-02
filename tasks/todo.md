@@ -197,3 +197,27 @@
 - Verified with `pytest tests/`: 214 passed.
 - Verified changed files with focused `ruff check`: clean.
 - Verified changed source files with focused `mypy`: clean.
+
+# Bugfix: stop read_file chunk loops
+
+- [x] Capture the transfer-note loop pattern.
+- [x] Preserve `read_file` range metadata in planner compact output.
+- [x] Separate prompt excerpt truncation from tool-level truncation.
+- [x] Allow `read_file(start_line=N)` to default to the next safe chunk.
+- [x] Preserve original failed tool errors instead of replacing them with success-output schema errors.
+- [x] Exit large-file read diagnosis after a successful chunked `read_file`.
+- [x] Add regressions for compact output and start-line-only chunking.
+- [x] Verify tests and document review.
+
+## Review
+
+- Transfer note shows repeated `read_file` calls over already-read README chunks. The planner event tail exposed content excerpts but dropped `start_line`, `end_line`, `total_lines`, and `end_of_file`, so the next LLM turn could not reliably know what had already been read.
+- `_compact_tool_output(read_file)` now preserves chunk progress metadata, slice/full-file hashes, and receipt id.
+- Prompt excerpt truncation is now reported as `content_excerpt_truncated`; the tool-level `truncated` flag now reflects only the real tool output. This prevents the planner from treating prompt compaction as a failed/incomplete file read.
+- `read_file(start_line=N)` without `end_line` now reads the next `_LINE_LIMIT` lines on large files. A fully unbounded read on a large file still returns `FILE_TOO_LARGE`.
+- Executor now skips success-output schema validation for failed tool results, so a structured `FILE_TOO_LARGE` does not get overwritten by `OUTPUT_SCHEMA_INVALID`.
+- Motivation now returns from `FAILURE_DIAGNOSIS_REQUIRED` to `READY` after a successful chunked `read_file` that recovered from `FILE_TOO_LARGE`; this prevents `declare_task_done` from being incorrectly forbidden after the recovery read.
+- Added regressions for compact output progress visibility, start-line-only chunk reads, failed-result executor behavior, and large-file diagnosis recovery.
+- Verified with `pytest tests/`: 221 passed.
+- Verified changed files with focused `ruff check`: clean.
+- Verified changed source files with focused `mypy`: clean.

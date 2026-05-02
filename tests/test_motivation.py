@@ -1,7 +1,7 @@
 """Motivation engine tests — verify declarative cycles."""
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from igla.kernel.clock import StepClock
 from igla.kernel.kernel import Kernel
@@ -13,7 +13,7 @@ from igla.protocol.runtime import RuntimeMode
 
 def _setup(make_settings) -> tuple[Kernel, MotivationCycle]:
     settings = make_settings()
-    kernel = Kernel(settings, clock=StepClock(datetime(2026, 4, 29, tzinfo=timezone.utc)))
+    kernel = Kernel(settings, clock=StepClock(datetime(2026, 4, 29, tzinfo=UTC)))
     rules = load_rules(settings.paths.motivation_file)
     return kernel, MotivationCycle(rules, kernel)
 
@@ -45,6 +45,52 @@ def test_failure_event_enters_diagnosis(make_settings) -> None:
     assert "tool:find_files" in state.allowed_next_actions
     assert "tool:search_text" in state.allowed_next_actions
     assert "declare_task_done" in state.forbidden_next_actions
+
+
+def test_chunked_read_success_exits_large_file_diagnosis(make_settings) -> None:
+    kernel, cycle = _setup(make_settings)
+    evt0 = kernel.events.append(kind=EventKind.TASK_CREATED, actor="runtime", task_id="t1")
+    cycle.dispatch(evt0)
+    kernel.state.mark_failure("t1", "FILE_TOO_LARGE")
+    cycle.dispatch(
+        kernel.events.append(
+            kind=EventKind.TOOL_INVOCATION_FAILED,
+            actor="tool:read_file",
+            task_id="t1",
+            step_id="s1",
+            payload={
+                "tool_name": "read_file",
+                "status": "failed",
+                "error_code": "FILE_TOO_LARGE",
+            },
+        )
+    )
+    assert kernel.state.get_state("t1").mode is RuntimeMode.FAILURE_DIAGNOSIS_REQUIRED
+
+    cycle.dispatch(
+        kernel.events.append(
+            kind=EventKind.TOOL_INVOCATION_COMPLETED,
+            actor="tool:read_file",
+            task_id="t1",
+            step_id="s2",
+            payload={
+                "tool_name": "read_file",
+                "status": "success",
+                "output": {
+                    "start_line": 0,
+                    "end_line": 1000,
+                    "total_lines": 1500,
+                    "end_of_file": False,
+                },
+            },
+        )
+    )
+
+    state = kernel.state.get_state("t1")
+    assert state.mode is RuntimeMode.READY
+    assert state.last_error_code is None
+    assert "declare_task_done" in state.allowed_next_actions
+    assert state.forbidden_next_actions == []
 
 
 def test_user_input_resumes_after_clarification(make_settings) -> None:

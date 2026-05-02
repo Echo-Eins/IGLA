@@ -75,7 +75,7 @@ def _alarm_timeout(seconds: int) -> Iterator[None]:
 class Executor:
     def __init__(
         self,
-        registry: "ToolRegistry",
+        registry: ToolRegistry,
         validator: SchemaValidator,
         context: ExecutorContext,
     ) -> None:
@@ -127,6 +127,11 @@ class Executor:
                 details={"traceback": traceback.format_exc()},
                 runtime_ms=elapsed,
             )
+
+        # Validate successful outputs only. Failed ToolResult envelopes carry a
+        # structured error and usually no success-shaped output payload.
+        if result.status != "success":
+            return result
 
         # Validate output
         try:
