@@ -1,6 +1,7 @@
 """End-to-end tests of the planner loop using the OfflineCannedClient."""
 from __future__ import annotations
 
+import hashlib
 import json
 from datetime import UTC, datetime
 
@@ -495,6 +496,80 @@ def test_failed_tool_enters_diagnosis_and_persists_through_clarification(
     assert state.mode is RuntimeMode.FAILURE_DIAGNOSIS_REQUIRED
     assert "declare_task_done" in state.forbidden_next_actions
     assert state.pre_pause_mode is None
+
+
+def test_file_not_found_diagnosis_recovery_allows_followup_patch(make_settings) -> None:
+    settings = make_settings()
+    target = settings.paths.workspace / "tasks" / "todo.md"
+    target.parent.mkdir(parents=True)
+    original = b"todo\n"
+    target.write_bytes(original)
+    base_sha256 = "sha256:" + hashlib.sha256(original).hexdigest()
+    canned = [
+        {
+            "action": "tool_invocation",
+            "tool_name": "read_file",
+            "tool_version": "1.0.0",
+            "input": {"path": "[todo.md"},
+            "reason": "bad model path from user markup",
+        },
+        {
+            "action": "tool_invocation",
+            "tool_name": "find_files",
+            "tool_version": "1.0.0",
+            "input": {"query": "todo.md", "max_results": 20},
+            "reason": "recover by discovering the real path",
+        },
+        {
+            "action": "tool_invocation",
+            "tool_name": "read_file",
+            "tool_version": "1.0.0",
+            "input": {"path": "tasks/todo.md"},
+            "reason": "read corrected path before patching",
+        },
+        {
+            "action": "tool_invocation",
+            "tool_name": "patch_file",
+            "tool_version": "1.0.0",
+            "input": {
+                "path": "tasks/todo.md",
+                "base_sha256": base_sha256,
+                "search": "todo\n",
+                "replacement": "done\n",
+            },
+            "reason": "append requested change after corrected read",
+        },
+        {
+            "action": "declare_task_done",
+            "summary": "patched",
+            "reason": "file changed",
+        },
+    ]
+    planner, kernel, _, _, _ = build_runtime(
+        settings,
+        canned_responses=canned,
+        clock=StepClock(datetime(2026, 4, 29, tzinfo=UTC), step_seconds=0.1),
+    )
+    task = _new_task("change tasks/todo.md from todo to done", kernel)
+    todo = TodoTree(task.task_id, kernel.clock)
+    todo.create_root(title="change file")
+
+    outcome = planner.run_task(task, todo)
+
+    assert outcome.status is TaskStatus.DONE
+    assert target.read_text(encoding="utf-8") == "done\n"
+    rejections = [
+        e
+        for e in kernel.events.list_by_task(task.task_id)
+        if e.kind is EventKind.POLICY_REJECTION
+    ]
+    assert all(e.payload["reason_code"] != "NO_BLIND_RETRY" for e in rejections)
+    completed_tools = [
+        e.payload["tool_name"]
+        for e in kernel.events.list_by_task(task.task_id)
+        if e.kind is EventKind.TOOL_INVOCATION_COMPLETED
+    ]
+    assert completed_tools == ["find_files", "read_file", "patch_file"]
 
 
 def test_open_file_flow_can_discover_then_read(make_settings) -> None:

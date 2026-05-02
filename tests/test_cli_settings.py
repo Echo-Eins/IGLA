@@ -84,3 +84,9 @@ def test_default_llm_backend_remains_lmstudio(tmp_path: Path) -> None:
         assert isinstance(llm, LMStudioClient)
     finally:
         llm.close()
+
+
+def test_cli_accepts_rtlog_short_alias(tmp_path: Path) -> None:
+    args = build_parser().parse_args(["--workspace", str(tmp_path), "-rtlog", "chat"])
+
+    assert args.rtlog is True

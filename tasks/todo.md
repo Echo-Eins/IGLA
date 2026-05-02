@@ -266,3 +266,62 @@
 - Verified with `pytest tests/`: 221 passed.
 - Verified changed files with focused `ruff check`: clean.
 - Verified changed source files with focused `mypy`: clean.
+
+# Bugfix: rtlog visibility and FILE_NOT_FOUND diagnosis recovery
+
+- [x] Capture the pasted runtime failure: `read_file` bad path enters `FAILURE_DIAGNOSIS_REQUIRED`, discovery then finds the file, but `patch_file` remains forbidden.
+- [x] Add a motivation recovery exit for planner-class `FILE_NOT_FOUND` after successful corrective discovery/read evidence.
+- [x] Cover the recovery with focused motivation and planner-loop regressions.
+- [x] Finish `-rtlog` / `--rtlog` CLI support so chat prints LLM turn payloads and model tool calls in copyable form.
+- [x] Cover rtlog CLI behavior and flag parsing with tests.
+- [x] Run focused checks plus the full test suite and record the review.
+
+## Review
+
+- Root cause confirmed: `read_file(FILE_NOT_FOUND)` correctly entered `FAILURE_DIAGNOSIS_REQUIRED`, but a later successful `find_files` did not clear the planner-path failure. The policy then kept `patch_file` blocked with `NO_BLIND_RETRY`, creating a recovery deadlock.
+- Added `payload_number_at_least` motivation condition for numeric payload checks without ad-hoc rule code.
+- Added two narrow recovery rules: `FILE_NOT_FOUND + find_files(count >= 1)` and `FILE_NOT_FOUND + corrected read_file success` both return runtime to `READY`, clear the stale error, restore normal allowed actions, and remove `declare_task_done` from forbidden actions.
+- Empty `find_files` after `FILE_NOT_FOUND` intentionally stays in diagnosis.
+- `-rtlog` is now accepted as an alias for `--rtlog`.
+- Plain CLI rtlog output uses ASCII labels and logs message counts, per-message role/size, the changing turn payload, model action/tool name, model tool params, and reason.
+- Added regressions for motivation recovery, an end-to-end planner flow that patches after correcting a bad path, rtlog output, and `-rtlog` flag parsing.
+- Verified focused tests: `pytest tests/test_motivation.py tests/test_planner_loop.py tests/test_plain_cli.py tests/test_cli_settings.py` -> 37 passed.
+- Verified full tests: `pytest tests/` -> 244 passed.
+- Verified changed files with focused `ruff check`: clean.
+- Verified changed source files with focused `mypy`: clean.
+
+# Audit: IGLA runtime logic risks
+
+- [x] Review motivation/policy transitions for deadlocks and invalid action unlocks.
+- [x] Review planner loop prompt/event cursor behavior and task completion shortcuts.
+- [x] Review tool contracts for path, receipt, rollback, and output-shape edge cases.
+- [x] Compare current tests against discovered risk areas.
+- [x] Document findings and recommended fixes.
+
+## Review
+
+- `patch_file` and `restore_file` accept `reason` in input and copy it into successful output, but their output schemas forbid extra fields and do not declare `reason`. Through `Executor`, a real successful mutation/restore becomes `OUTPUT_SCHEMA_INVALID`; confirmed with focused repro scripts.
+- `read_file` normalizes file content via `splitlines()` and then rejoins with `\n`, adding a newline for any non-empty slice. A model can copy exact `read_file.content` into `patch_file.search` and still get `SEARCH_NOT_FOUND` on CRLF/no-final-newline files; confirmed with a CRLF repro.
+- `exit_failure_diagnosis_for_patch_planner_error` returns mode to `READY` but leaves `last_error_code` stale, unlike the newer `FILE_NOT_FOUND`/`FILE_TOO_LARGE` recovery rules. This keeps misleading failure state in the next prompt.
+- `TaskConstraints` exposes `no_file_mutation`, `no_network`, `max_clarification_depth`, plus task-level `allowed_actions`/`forbidden_actions`, but runtime enforcement currently uses only `max_iterations`. These fields are architectural promises without policy enforcement.
+- `find_files(query=...)` checks only the basename, not the full relative path. Path-like queries such as `tasks/todo.md` require the model to switch to `glob`, which is fragile for weak/local models.
+- The old Rich REPL is now functionally stale compared to plain CLI: no `/reset-state`, no `-rtlog` path, and separate command behavior.
+- Re-entering `Planner.run_task` for an already `TASK_DONE` state returns `state.last_rejection_message` as the summary, not the actual completion summary.
+- `patch_file` says no-op patches avoid backup/write, but still snapshots and writes unconditionally after producing identical bytes. This is not a user-visible failure, but it violates the tool's own invariant.
+
+# Audit: task context memory
+
+- [x] Find task-memory/event-log components and docs.
+- [x] Trace one-task lifecycle from creation to task_done.
+- [x] Check what memory is fed back into the planner prompt.
+- [x] Compare implementation against the task-memory spec.
+- [x] Document conclusion and gaps.
+
+## Review
+
+- Current implementation has a working first slab: `.igla/events.jsonl` is the append-only per-task substrate, `TaskWorkLog` derives a compact per-task journal from it, and `read_task_log` exposes that journal to the model for the current task only.
+- The task log is closed logically, not as a separate file handle: `TaskWorkLog.is_closed()` returns true after `task_completed` or `task_failed` appears in EventStore.
+- The planner automatically feeds only the fresh event delta into each turn prompt. Older task history is not automatically rehydrated; the model must call `read_task_log`.
+- `read_task_log` is registered in the default toolset and covered by tests; focused verification passed: `pytest tests/test_task_work_log.py tests/test_event_store.py tests/test_registry.py -q` -> 13 passed.
+- This is not the full memory system from docs: there is no `.igla/memory/working/<task_id>`, no `MemoryService`, no Fact/Case/Project/Preference memory, no dedupe, no retrieval, and no Memory Curator that distills task results after completion.
+- The compact work log intentionally omits some rich reasoning/state events (`llm_proposal_received`, TODO branching, runtime mode changes). It records actions/results well enough for debugging, but not full "model developments/hypotheses" as described in the task-memory idea.

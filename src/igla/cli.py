@@ -250,6 +250,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="Disable JSON Schema response_format (use json_object fallback)",
     )
     parser.add_argument(
+        "-rtlog",
         "--rtlog",
         action="store_true",
         help="Real-time log: print each LLM request/response to the terminal",

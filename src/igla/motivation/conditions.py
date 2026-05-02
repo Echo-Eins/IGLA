@@ -86,11 +86,9 @@ def _payload_equals(ctx: ConditionContext) -> bool:
     if not path:
         raise ValueError("payload_equals requires args.path")
     expected = ctx.rule_args.get("value")
-    actual: Any = ctx.event.payload
-    for part in path.split("."):
-        if not isinstance(actual, dict) or part not in actual:
-            return False
-        actual = actual[part]
+    found, actual = _payload_lookup(ctx.event.payload, path)
+    if not found:
+        return False
     return bool(actual == expected)
 
 
@@ -99,12 +97,34 @@ def _payload_in(ctx: ConditionContext) -> bool:
     values = ctx.rule_args.get("values") or []
     if not path:
         raise ValueError("payload_in requires args.path")
-    actual: Any = ctx.event.payload
+    found, actual = _payload_lookup(ctx.event.payload, path)
+    if not found:
+        return False
+    return bool(actual in values)
+
+
+def _payload_number_at_least(ctx: ConditionContext) -> bool:
+    path = ctx.rule_args.get("path")
+    if not path:
+        raise ValueError("payload_number_at_least requires args.path")
+    if "minimum" not in ctx.rule_args:
+        raise ValueError("payload_number_at_least requires args.minimum")
+    found, actual = _payload_lookup(ctx.event.payload, path)
+    if not found or isinstance(actual, bool):
+        return False
+    try:
+        return float(actual) >= float(ctx.rule_args["minimum"])
+    except (TypeError, ValueError):
+        return False
+
+
+def _payload_lookup(payload: dict[str, Any], path: str) -> tuple[bool, Any]:
+    actual: Any = payload
     for part in path.split("."):
         if not isinstance(actual, dict) or part not in actual:
-            return False
+            return False, None
         actual = actual[part]
-    return bool(actual in values)
+    return True, actual
 
 
 def _tool_called_was(ctx: ConditionContext) -> bool:
@@ -138,6 +158,7 @@ for _name, _fn in [
     ("all_flags_set", _all_flags_set),
     ("payload_equals", _payload_equals),
     ("payload_in", _payload_in),
+    ("payload_number_at_least", _payload_number_at_least),
     ("tool_called_was", _tool_called_was),
     ("result_status_was", _result_status_was),
     ("last_error_code_in", _last_error_code_in),

@@ -45,6 +45,10 @@ from ..tools.builtin import (
 class _RtlogLLMClient:
     """Wraps any LLMClient and prints a compact real-time log of each turn."""
 
+    _TURN_LIMIT = 6000
+    _PARAMS_LIMIT = 2000
+    _REASON_LIMIT = 500
+
     def __init__(self, inner: LLMClient) -> None:
         self._inner = inner
 
@@ -58,14 +62,15 @@ class _RtlogLLMClient:
         msgs = list(messages)
         non_sys = [m for m in msgs if m.role != "system"]
         total_chars = sum(len(m.content) for m in msgs)
-        safe_print(f"\n{'─' * 60}")
-        safe_print(f"[→ LLM] {len(msgs)} messages, {total_chars} chars total")
+        safe_print("")
+        safe_print("-" * 60)
+        safe_print(f"[LLM ->] {len(msgs)} messages, {total_chars} chars total")
+        for idx, msg in enumerate(msgs, start=1):
+            safe_print(f"[LLM ->] message {idx}: role={msg.role} chars={len(msg.content)}")
         if non_sys:
             last = non_sys[-1]
-            content = last.content
-            if len(content) > 1500:
-                content = content[:1500] + f"\n... [{len(last.content) - 1500} chars truncated]"
-            safe_print(f"[→ TURN]:\n{content}")
+            content = _truncate_for_rtlog(last.content, self._TURN_LIMIT)
+            safe_print(f"[TURN ->]\n{content}")
 
         raw = self._inner.complete_json(
             messages=msgs,
@@ -79,19 +84,24 @@ class _RtlogLLMClient:
         reason = str(raw.get("reason", ""))
         if tool:
             params_str = json.dumps(inp, ensure_ascii=False, separators=(",", ":"))
-            if len(params_str) > 600:
-                params_str = params_str[:600] + "..."
-            safe_print(f"[← MODEL] action={action}  tool={tool}")
-            safe_print(f"[← PARAMS] {params_str}")
+            params_str = _truncate_for_rtlog(params_str, self._PARAMS_LIMIT)
+            safe_print(f"[MODEL <-] action={action}  tool={tool}")
+            safe_print(f"[PARAMS <-] {params_str}")
         else:
-            safe_print(f"[← MODEL] action={action}")
+            safe_print(f"[MODEL <-] action={action}")
         if reason:
-            r = reason[:200] + "..." if len(reason) > 200 else reason
-            safe_print(f"[← REASON] {r}")
+            safe_print(f"[REASON <-] {_truncate_for_rtlog(reason, self._REASON_LIMIT)}")
         return raw
 
     def close(self) -> None:
         self._inner.close()
+
+
+def _truncate_for_rtlog(text: str, limit: int) -> str:
+    if len(text) <= limit:
+        return text
+    omitted = len(text) - limit
+    return f"{text[:limit]}\n... [{omitted} chars truncated]"
 
 
 @dataclass

@@ -30,6 +30,33 @@ def test_plain_cli_run_once_prints_copyable_timeline(make_settings, capsys) -> N
     assert "llm_request_sent actor=planner" in out
 
 
+def test_plain_cli_rtlog_prints_turn_and_model_tool_call(make_settings, capsys) -> None:
+    settings = make_settings()
+    (settings.paths.workspace / "README.md").write_text("# Readme\n", encoding="utf-8")
+    llm = OfflineCannedClient(
+        [
+            {
+                "action": "tool_invocation",
+                "tool_name": "find_files",
+                "tool_version": "1.0.0",
+                "input": {"query": "README.md", "max_results": 20},
+                "reason": "locate requested file",
+            }
+        ]
+    )
+    cli = PlainCLI(settings=settings, llm=llm, rtlog=True)
+
+    outcome = cli.run_once("find README.md")
+
+    assert outcome.status is TaskStatus.DONE
+    out = capsys.readouterr().out
+    assert "[LLM ->] 3 messages" in out
+    assert "[TURN ->]" in out
+    assert "[MODEL <-] action=tool_invocation  tool=find_files" in out
+    assert '[PARAMS <-] {"query":"README.md","max_results":20}' in out
+    assert "[REASON <-] locate requested file" in out
+
+
 def test_plain_cli_reset_state_removes_poisoned_runtime(make_settings, capsys) -> None:
     settings = make_settings()
     poison = settings.paths.state_dir / "poison.txt"

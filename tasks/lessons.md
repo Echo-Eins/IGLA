@@ -142,3 +142,17 @@ more reliable structured-output controls.
 Backend selection must be explicit in config/CLI/env, and model names must be
 opaque strings owned by the backend. For Ollama, accept any model tag the user
 can see in `ollama list`; do not hard-code a local model catalog in IGLA.
+
+## 2026-05-02: Failure diagnosis exits must cover corrected planner mistakes
+
+Do not treat every `FILE_NOT_FOUND` as a changed-world failure. If the planner
+used a bad path, then a later successful `find_files` result or corrected
+`read_file` is evidence that the failure was a planner-path error and no
+world mutation is required to recover. Return the task to `READY`; otherwise
+`patch_file` stays forbidden while the only old generic exit requires a
+successful patch, creating a policy deadlock.
+
+Runtime debug logging is part of the control surface for remote/local model
+testing. A `-rtlog` path must be tested like any other CLI behavior, because
+uncopyable or partial logs hide prompt bloat, malformed model proposals, and
+looping tool choices from diagnosis.

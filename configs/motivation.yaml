@@ -145,6 +145,80 @@ rules:
       - kind: log_message
         args: { message: "Recovered from large-file read diagnosis" }
 
+  - id: exit_file_not_found_diagnosis_after_find_files_success
+    description: >
+      FILE_NOT_FOUND can be a planner path error rather than a world-state
+      failure. If corrective discovery finds at least one candidate file,
+      return to READY so the planner can read or patch the corrected path.
+    priority: 35
+    triggers:
+      - on_event: tool_invocation_completed
+    conditions:
+      - kind: runtime_mode_is
+        args: { mode: failure_diagnosis_required }
+      - kind: tool_called_was
+        args: { name: find_files }
+      - kind: result_status_was
+        args: { status: success }
+      - kind: last_error_code_in
+        args: { codes: [FILE_NOT_FOUND] }
+      - kind: payload_number_at_least
+        args: { path: output.count, minimum: 1 }
+    effects:
+      - kind: set_mode
+        args: { mode: ready }
+      - kind: clear_last_error
+      - kind: clear_flags
+        args:
+          flags: [failure_classified, changed_condition_declared]
+      - kind: set_allowed_actions
+        args:
+          actions:
+            - tool_invocation
+            - ask_user_clarification
+            - todo_branch
+            - todo_complete
+            - declare_task_done
+      - kind: clear_forbidden_actions
+      - kind: log_message
+        args: { message: "Recovered from FILE_NOT_FOUND after find_files result" }
+
+  - id: exit_file_not_found_diagnosis_after_read_file_success
+    description: >
+      A corrected read_file path proves the earlier FILE_NOT_FOUND was a
+      planner-path mistake. Return to READY so follow-up mutating tools are
+      no longer blocked by diagnosis mode.
+    priority: 35
+    triggers:
+      - on_event: tool_invocation_completed
+    conditions:
+      - kind: runtime_mode_is
+        args: { mode: failure_diagnosis_required }
+      - kind: tool_called_was
+        args: { name: read_file }
+      - kind: result_status_was
+        args: { status: success }
+      - kind: last_error_code_in
+        args: { codes: [FILE_NOT_FOUND] }
+    effects:
+      - kind: set_mode
+        args: { mode: ready }
+      - kind: clear_last_error
+      - kind: clear_flags
+        args:
+          flags: [failure_classified, changed_condition_declared]
+      - kind: set_allowed_actions
+        args:
+          actions:
+            - tool_invocation
+            - ask_user_clarification
+            - todo_branch
+            - todo_complete
+            - declare_task_done
+      - kind: clear_forbidden_actions
+      - kind: log_message
+        args: { message: "Recovered from FILE_NOT_FOUND after corrected read_file" }
+
   - id: exit_failure_diagnosis_for_patch_planner_error
     description: >
       AMBIGUOUS_SEARCH, SEARCH_NOT_FOUND, and MISSING_PATCH_CONTENT are

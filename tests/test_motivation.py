@@ -93,6 +93,131 @@ def test_chunked_read_success_exits_large_file_diagnosis(make_settings) -> None:
     assert state.forbidden_next_actions == []
 
 
+def test_file_not_found_find_files_success_exits_diagnosis(make_settings) -> None:
+    kernel, cycle = _setup(make_settings)
+    cycle.dispatch(
+        kernel.events.append(kind=EventKind.TASK_CREATED, actor="runtime", task_id="t1")
+    )
+    kernel.state.mark_failure("t1", "FILE_NOT_FOUND")
+    cycle.dispatch(
+        kernel.events.append(
+            kind=EventKind.TOOL_INVOCATION_FAILED,
+            actor="tool:read_file",
+            task_id="t1",
+            step_id="s1",
+            payload={
+                "tool_name": "read_file",
+                "status": "failed",
+                "error_code": "FILE_NOT_FOUND",
+            },
+        )
+    )
+    assert kernel.state.get_state("t1").mode is RuntimeMode.FAILURE_DIAGNOSIS_REQUIRED
+
+    cycle.dispatch(
+        kernel.events.append(
+            kind=EventKind.TOOL_INVOCATION_COMPLETED,
+            actor="tool:find_files",
+            task_id="t1",
+            step_id="s2",
+            payload={
+                "tool_name": "find_files",
+                "status": "success",
+                "output": {
+                    "count": 1,
+                    "matches": [{"relative_path": "tasks/todo.md"}],
+                },
+            },
+        )
+    )
+
+    state = kernel.state.get_state("t1")
+    assert state.mode is RuntimeMode.READY
+    assert state.last_error_code is None
+    assert "tool_invocation" in state.allowed_next_actions
+    assert "declare_task_done" in state.allowed_next_actions
+    assert state.forbidden_next_actions == []
+
+
+def test_file_not_found_empty_find_files_stays_in_diagnosis(make_settings) -> None:
+    kernel, cycle = _setup(make_settings)
+    cycle.dispatch(
+        kernel.events.append(kind=EventKind.TASK_CREATED, actor="runtime", task_id="t1")
+    )
+    kernel.state.mark_failure("t1", "FILE_NOT_FOUND")
+    cycle.dispatch(
+        kernel.events.append(
+            kind=EventKind.TOOL_INVOCATION_FAILED,
+            actor="tool:read_file",
+            task_id="t1",
+            step_id="s1",
+            payload={
+                "tool_name": "read_file",
+                "status": "failed",
+                "error_code": "FILE_NOT_FOUND",
+            },
+        )
+    )
+    cycle.dispatch(
+        kernel.events.append(
+            kind=EventKind.TOOL_INVOCATION_COMPLETED,
+            actor="tool:find_files",
+            task_id="t1",
+            step_id="s2",
+            payload={
+                "tool_name": "find_files",
+                "status": "success",
+                "output": {"count": 0, "matches": []},
+            },
+        )
+    )
+
+    state = kernel.state.get_state("t1")
+    assert state.mode is RuntimeMode.FAILURE_DIAGNOSIS_REQUIRED
+    assert state.last_error_code == "FILE_NOT_FOUND"
+
+
+def test_file_not_found_corrected_read_file_success_exits_diagnosis(make_settings) -> None:
+    kernel, cycle = _setup(make_settings)
+    cycle.dispatch(
+        kernel.events.append(kind=EventKind.TASK_CREATED, actor="runtime", task_id="t1")
+    )
+    kernel.state.mark_failure("t1", "FILE_NOT_FOUND")
+    cycle.dispatch(
+        kernel.events.append(
+            kind=EventKind.TOOL_INVOCATION_FAILED,
+            actor="tool:read_file",
+            task_id="t1",
+            step_id="s1",
+            payload={
+                "tool_name": "read_file",
+                "status": "failed",
+                "error_code": "FILE_NOT_FOUND",
+            },
+        )
+    )
+    cycle.dispatch(
+        kernel.events.append(
+            kind=EventKind.TOOL_INVOCATION_COMPLETED,
+            actor="tool:read_file",
+            task_id="t1",
+            step_id="s2",
+            payload={
+                "tool_name": "read_file",
+                "status": "success",
+                "output": {
+                    "path": "/workspace/tasks/todo.md",
+                    "end_of_file": True,
+                },
+            },
+        )
+    )
+
+    state = kernel.state.get_state("t1")
+    assert state.mode is RuntimeMode.READY
+    assert state.last_error_code is None
+
+
 def test_user_input_resumes_after_clarification(make_settings) -> None:
     kernel, cycle = _setup(make_settings)
     cycle.dispatch(
