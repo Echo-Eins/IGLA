@@ -1,7 +1,7 @@
 """Shared fixtures."""
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -16,13 +16,7 @@ from igla.planner.planner import Planner
 from igla.policies.constitution import load_constitution
 from igla.policies.engine import PolicyContext, PolicyEngine
 from igla.todo.store import TodoStore
-from igla.tools.builtin import (
-    AskUserTool,
-    FindFilesTool,
-    NoopObserveTool,
-    ReadFileTool,
-    SearchTextTool,
-)
+from igla.tools.builtin import build_default_toolset
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 CONFIGS = REPO_ROOT / "configs"
@@ -71,7 +65,7 @@ def make_settings(tmp_path: Path):
 
 @pytest.fixture
 def step_clock() -> StepClock:
-    return StepClock(start=datetime(2026, 4, 29, 12, 0, 0, tzinfo=timezone.utc), step_seconds=1.0)
+    return StepClock(start=datetime(2026, 4, 29, 12, 0, 0, tzinfo=UTC), step_seconds=1.0)
 
 
 def build_runtime(
@@ -84,16 +78,13 @@ def build_runtime(
     kernel = Kernel(settings, clock=clock)
     channel = ScriptedAskUserChannel(answers or [])
     kernel.registry.register_many(
-        [
-            AskUserTool(channel=channel),
-            FindFilesTool(workspace_root=str(settings.paths.workspace)),
-            ReadFileTool(
-                workspace_root=str(settings.paths.workspace),
-                receipts=kernel.receipts,
-            ),
-            SearchTextTool(workspace_root=str(settings.paths.workspace)),
-            NoopObserveTool(),
-        ]
+        build_default_toolset(
+            ask_user_channel=channel,
+            workspace_root=str(settings.paths.workspace),
+            receipts=kernel.receipts,
+            rollback=kernel.rollback,
+            work_log=kernel.work_log,
+        )
     )
     constitution = load_constitution(settings.paths.constitution_file)
     policy = PolicyEngine(

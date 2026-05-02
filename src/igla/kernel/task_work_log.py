@@ -229,26 +229,38 @@ def _summarise_tool_output(tool_name: str, output: dict[str, Any]) -> dict[str, 
             ["path", "file_type", "checks_run", "overall_passed"],
         )
     if name == "find_files":
-        # tool already returns a small {results, total_matches} shape
-        results = output.get("results")
-        if isinstance(results, list):
+        matches = output.get("matches")
+        if isinstance(matches, list):
             return {
-                "total_matches": output.get("total_matches"),
+                "count": output.get("count"),
                 "first_paths": [
-                    str(r.get("path") if isinstance(r, dict) else r)
-                    for r in results[:5]
+                    str(r.get("relative_path") if isinstance(r, dict) else r)
+                    for r in matches[:5]
                 ],
             }
-        return _pick(output, ["total_matches"])
+        return _pick(output, ["count"])
     if name == "list_dir":
-        return _pick(output, ["path", "total_files", "total_dirs"])
+        return _pick(output, ["root", "total_files", "total_dirs"])
     if name == "read_file":
         return _pick(
             output,
             ["path", "start_line", "end_line", "total_lines", "end_of_file"],
         )
     if name == "search_text":
-        return _pick(output, ["query", "total_matches"])
+        matches = output.get("matches")
+        if isinstance(matches, list):
+            return {
+                "count": output.get("count"),
+                "first_matches": [
+                    {
+                        "relative_path": r.get("relative_path"),
+                        "line_number": r.get("line_number"),
+                    }
+                    for r in matches[:5]
+                    if isinstance(r, dict)
+                ],
+            }
+        return _pick(output, ["count"])
     return {}
 
 

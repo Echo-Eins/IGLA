@@ -93,6 +93,58 @@ program exits with 0
 git diff соответствует объявленному PatchPlan
 ```
 
+### Реализованный MVP: `verify_file`
+
+Текущая реализация — tool `verify_file`, вызываемый планировщиком явно после
+`read_file` или `patch_file`.
+
+Инварианты:
+
+- `verify_file` принимает только путь внутри workspace;
+- файл должен быть уже прочитан или пропатчен в этой же задаче, иначе
+  возвращается `NO_RECEIPT_FOR_PATH`;
+- проверка не делает rollback автоматически;
+- результат failed check возвращается как успешный ToolResult с
+  `overall_passed=false`, чтобы модель могла выбрать: допатчить, перечитать,
+  запустить более узкий тест или вызвать `restore_file`;
+- rollback выполняется только явным `restore_file` либо будущей отдельной
+  runtime-логикой с понятным policy-событием.
+
+Автовыбор проверок:
+
+| Тип файла | Проверки по умолчанию |
+|-----------|------------------------|
+| `.py` | `syntax`, `lint` |
+| `.json` | `syntax` |
+| `.yaml`, `.yml` | `syntax` |
+| прочие | пустой список, если `checks` не задан |
+
+`pytest` никогда не запускается автоматически. Для него нужно явно указать:
+
+```json
+{
+  "path": "src/igla/foo.py",
+  "checks": ["pytest"],
+  "test_path": "tests/test_foo.py"
+}
+```
+
+`test_path` также обязан лежать внутри workspace. Это сохраняет blast radius:
+модель может запускать только найденные/явно выбранные локальные unit tests, а
+не произвольные команды.
+
+Настройка окружения:
+
+```bash
+python -m pip install -e ".[dev]"
+python -m pytest tests
+python -m ruff check src tests
+```
+
+`verify_file` запускает `ruff` и `pytest` через текущий Python-интерпретатор
+(`python -m ruff`, `python -m pytest`), поэтому зависимости должны быть
+установлены в той же venv, из которой запущена ИГЛА.
+
 ### Для vLLM
 
 ```

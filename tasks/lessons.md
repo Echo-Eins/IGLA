@@ -76,3 +76,16 @@ finding the file is only an intermediate result and must continue toward
 Debug CLI input is part of the runtime contract. If a terminal leaks
 backspace/delete or ANSI control bytes into stdin, sanitize the line before it
 becomes a task goal; otherwise stale deleted text poisons the planner state.
+
+## 2026-05-01: Capability taxonomies need explicit negative cases
+
+Do not rely only on broad tool capabilities such as `fs.read` when enforcing
+policy gates. `read_file` is workspace discovery, but `verify_file` is
+post-work validation even though it reads a file. `read_task_log` is memory
+inspection, not workspace discovery. Policy predicates need explicit
+non-discovery exclusions and regression tests for tools that are read-only but
+do not help the model find missing information.
+
+When tests assert file hashes or backup bytes, write fixture files as bytes or
+force LF newlines. Otherwise Windows CRLF translation can hide platform
+assumptions in a Linux-first project.

@@ -174,3 +174,26 @@
 - Motivation: a successful `patch_file` sets `changed_condition_declared` so the runtime can later exit `FAILURE_DIAGNOSIS_REQUIRED` once the failure is classified.
 - Verified with `pytest tests/`: 199 passed (49 new tests across `test_rollback_manager.py` and `test_patch_file.py`).
 - Verified with `ruff check` on all changed source files: clean.
+
+# Continue transfer note: verifier + per-task memory hardening
+
+- [x] Read transfer note and inspect the last commit additions.
+- [x] Verify `verify_file` / `read_task_log` do not unlock user clarification as discovery.
+- [x] Add focused tests for `verify_file` receipt gate, syntax checks, lint/pytest command paths, and failure modes.
+- [x] Add focused tests for `TaskWorkLog` / `read_task_log` closure, truncation, and summaries.
+- [x] Check default toolset wiring for new tools.
+- [x] Run full tests and focused lint/type checks.
+- [x] Document review and setup notes.
+
+## Review
+
+- `verify_file` and `read_task_log` are explicitly excluded from workspace discovery unlocks; they cannot legitimize asking the user for paths.
+- `verify_file` now runs subprocess checks through the current interpreter (`python -m ruff` / `python -m pytest` via `sys.executable`), which is venv-safe.
+- `TaskWorkLog` summaries now match current tool output shapes (`find_files.matches/count`, `search_text.matches/count`, `list_dir.root`).
+- Test runtime wiring now uses `build_default_toolset`, so planner tests exercise the same default tool registration surface as the CLI.
+- Added `test_verify_file.py`, `test_task_work_log.py`, new policy regressions, and default toolset coverage.
+- Fixed CRLF-sensitive `test_patch_file.py` writes by using explicit LF bytes where tests assert hashes/backup bytes.
+- Documented current `verify_file` setup and behavior in `docs/10-verification-rollback.md`.
+- Verified with `pytest tests/`: 214 passed.
+- Verified changed files with focused `ruff check`: clean.
+- Verified changed source files with focused `mypy`: clean.

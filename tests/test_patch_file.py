@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import hashlib
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from unittest.mock import MagicMock
 
@@ -23,7 +23,7 @@ def _hash(data: bytes) -> str:
 
 
 def _build(tmp_path: Path):
-    clock = StepClock(start=datetime(2026, 5, 1, tzinfo=timezone.utc))
+    clock = StepClock(start=datetime(2026, 5, 1, tzinfo=UTC))
     receipts_dir = tmp_path / ".receipts"
     artifacts_dir = tmp_path / ".artifacts"
     receipts = ReceiptManager(receipts_dir, clock)
@@ -87,7 +87,7 @@ def _restore_inv(backup_id: str, **fields) -> ToolInvocation:
 
 def test_read_file_emits_file_sha256(tmp_path):
     target = tmp_path / "f.txt"
-    target.write_text("hello\nworld\n")
+    target.write_bytes(b"hello\nworld\n")
     read_tool, *_ = _build(tmp_path)
 
     result = read_tool.invoke(_read_inv(tmp_path, "f.txt"))
@@ -187,7 +187,7 @@ def test_search_replace_all(tmp_path):
 def test_patch_creates_backup_artifact_with_original_bytes(tmp_path):
     target = tmp_path / "f.txt"
     original = "ORIGINAL CONTENT\n"
-    target.write_text(original)
+    target.write_bytes(original.encode("utf-8"))
     read_tool, patch_tool, _, _, rollback, artifacts = _build(tmp_path)
 
     base = read_tool.invoke(_read_inv(tmp_path, "f.txt")).output["file_sha256"]
@@ -224,7 +224,7 @@ def test_patch_updates_receipt_with_new_hash(tmp_path):
 def test_patch_no_op_full_replace_succeeds(tmp_path):
     """new_content equal to current content should still succeed (idempotent)."""
     target = tmp_path / "f.txt"
-    target.write_text("same\n")
+    target.write_bytes(b"same\n")
     read_tool, patch_tool, *_ = _build(tmp_path)
 
     base = read_tool.invoke(_read_inv(tmp_path, "f.txt")).output["file_sha256"]
@@ -401,7 +401,7 @@ def test_read_before_write_denies_when_no_receipt(tmp_path):
     target = tmp_path / "f.txt"
     target.write_text("x")
     receipts_dir = tmp_path / ".receipts"
-    clock = StepClock(start=datetime(2026, 5, 1, tzinfo=timezone.utc))
+    clock = StepClock(start=datetime(2026, 5, 1, tzinfo=UTC))
     receipts = ReceiptManager(receipts_dir, clock)
 
     kernel = MagicMock()
@@ -425,7 +425,7 @@ def test_read_before_write_allows_when_receipt_exists(tmp_path):
     fn = PREDICATES["read_before_write"]
     target = tmp_path / "f.txt"
     target.write_text("x")
-    clock = StepClock(start=datetime(2026, 5, 1, tzinfo=timezone.utc))
+    clock = StepClock(start=datetime(2026, 5, 1, tzinfo=UTC))
     receipts = ReceiptManager(tmp_path / ".receipts", clock)
     receipts.record_file_read(
         task_id="t1",
@@ -479,7 +479,7 @@ def test_hash_matches_receipt_allows_when_match(tmp_path):
     fn = PREDICATES["hash_matches_receipt"]
     target = tmp_path / "f.txt"
     target.write_text("x")
-    clock = StepClock(start=datetime(2026, 5, 1, tzinfo=timezone.utc))
+    clock = StepClock(start=datetime(2026, 5, 1, tzinfo=UTC))
     receipts = ReceiptManager(tmp_path / ".receipts", clock)
     receipts.record_file_read(
         task_id="t1",
@@ -508,7 +508,7 @@ def test_hash_matches_receipt_denies_when_mismatch(tmp_path):
     fn = PREDICATES["hash_matches_receipt"]
     target = tmp_path / "f.txt"
     target.write_text("x")
-    clock = StepClock(start=datetime(2026, 5, 1, tzinfo=timezone.utc))
+    clock = StepClock(start=datetime(2026, 5, 1, tzinfo=UTC))
     receipts = ReceiptManager(tmp_path / ".receipts", clock)
     receipts.record_file_read(
         task_id="t1",
@@ -539,7 +539,7 @@ def test_hash_matches_receipt_denies_when_mismatch(tmp_path):
 def test_hash_matches_receipt_passes_when_no_receipt(tmp_path):
     """When there's no receipt, read_before_write handles it; this predicate allows."""
     fn = PREDICATES["hash_matches_receipt"]
-    clock = StepClock(start=datetime(2026, 5, 1, tzinfo=timezone.utc))
+    clock = StepClock(start=datetime(2026, 5, 1, tzinfo=UTC))
     receipts = ReceiptManager(tmp_path / ".receipts", clock)
 
     kernel = MagicMock()
@@ -565,7 +565,7 @@ def test_hash_matches_receipt_passes_when_no_receipt(tmp_path):
 def test_restore_file_reverts_a_patch(tmp_path):
     target = tmp_path / "f.txt"
     original = "ORIGINAL\n"
-    target.write_text(original)
+    target.write_bytes(original.encode("utf-8"))
     read_tool, patch_tool, restore_tool, *_ = _build(tmp_path)
 
     base = read_tool.invoke(_read_inv(tmp_path, "f.txt")).output["file_sha256"]
@@ -592,7 +592,7 @@ def test_restore_file_unknown_backup(tmp_path):
 def test_restore_file_updates_receipt(tmp_path):
     target = tmp_path / "f.txt"
     original = "ORIGINAL\n"
-    target.write_text(original)
+    target.write_bytes(original.encode("utf-8"))
     read_tool, patch_tool, restore_tool, receipts, *_ = _build(tmp_path)
 
     base = read_tool.invoke(_read_inv(tmp_path, "f.txt")).output["file_sha256"]

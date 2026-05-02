@@ -51,10 +51,11 @@ from __future__ import annotations
 import ast
 import json
 import subprocess
+import sys
 from pathlib import Path
 from typing import Any
 
-import yaml
+import yaml  # type: ignore[import-untyped]
 
 from ...kernel.receipt_manager import ReceiptManager
 from ...protocol.invocation import ToolInvocation
@@ -385,7 +386,14 @@ class VerifyFileTool(Tool):
             }
         try:
             proc = subprocess.run(
-                ["ruff", "check", str(target), "--output-format=concise"],
+                [
+                    sys.executable,
+                    "-m",
+                    "ruff",
+                    "check",
+                    str(target),
+                    "--output-format=concise",
+                ],
                 capture_output=True,
                 text=True,
                 cwd=str(self._workspace),
@@ -397,8 +405,8 @@ class VerifyFileTool(Tool):
                 "check": "lint",
                 "passed": False,
                 "skipped": False,
-                "error": "ruff not found in PATH",
-                "output": "ruff is required for the lint check; install it (pip install ruff).",
+                "error": "current Python interpreter not found",
+                "output": "Cannot execute the current Python interpreter for `python -m ruff`.",
             }
         except subprocess.TimeoutExpired:
             return {
@@ -426,7 +434,7 @@ class VerifyFileTool(Tool):
         try:
             proc = subprocess.run(
                 [
-                    "python",
+                    sys.executable,
                     "-m",
                     "pytest",
                     str(test_path),
@@ -447,7 +455,7 @@ class VerifyFileTool(Tool):
                 "check": "pytest",
                 "passed": False,
                 "skipped": False,
-                "error": "python interpreter not found in PATH",
+                "error": "current Python interpreter not found",
                 "output": "",
                 "test_path": str(test_path),
             }
@@ -581,16 +589,16 @@ def _join_streams(stdout: str, stderr: str) -> str:
 
 
 def _first_line(text: str) -> str:
-    for line in text.splitlines():
-        line = line.strip()
+    for raw_line in text.splitlines():
+        line = raw_line.strip()
         if line:
             return line[:300]
     return ""
 
 
 def _last_line(text: str) -> str:
-    for line in reversed(text.splitlines()):
-        line = line.strip()
+    for raw_line in reversed(text.splitlines()):
+        line = raw_line.strip()
         if line:
             return line[:300]
     return ""

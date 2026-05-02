@@ -90,6 +90,7 @@ PredicateFn = Callable[[PredicateContext], PredicateOutcome]
 PREDICATES: dict[str, PredicateFn] = {}
 
 _DISCOVERY_TOOL_NAMES = frozenset({"find_files", "search_text", "read_file", "list_dir"})
+_NON_DISCOVERY_TOOL_NAMES = frozenset({"verify_file", "read_task_log"})
 _DISCOVERY_CAPABILITIES = frozenset(
     {
         "fs.find",
@@ -439,6 +440,8 @@ def _discovery_tool_hints(ctx: PredicateContext) -> tuple[str, ...]:
 
 
 def _is_discovery_manifest(manifest: ToolManifest) -> bool:
+    if manifest.name in _NON_DISCOVERY_TOOL_NAMES:
+        return False
     if manifest.name in _DISCOVERY_TOOL_NAMES:
         return True
     return bool(_DISCOVERY_CAPABILITIES.intersection(manifest.capabilities))

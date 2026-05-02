@@ -1,11 +1,25 @@
 """ToolRegistry tests."""
 from __future__ import annotations
 
+from datetime import UTC, datetime
+
 import pytest
 
+from igla.kernel.artifact_store import ArtifactStore
+from igla.kernel.clock import StepClock
 from igla.kernel.errors import KernelError, ToolNotFoundError
+from igla.kernel.event_store import EventStore
+from igla.kernel.receipt_manager import ReceiptManager
 from igla.kernel.registry import ToolRegistry
+from igla.kernel.rollback_manager import RollbackManager
+from igla.kernel.task_work_log import TaskWorkLog
+from igla.tools.builtin import build_default_toolset
 from igla.tools.builtin.noop_observe import NoopObserveTool
+
+
+class _DummyAsk:
+    def ask(self, *, question: str, prompt_label: str | None = None) -> str:
+        return ""
 
 
 def test_register_and_lookup() -> None:
@@ -68,3 +82,25 @@ def test_wrong_version_falls_back_to_registered() -> None:
     assert not reg.has("no_such_tool", "1.0.0")
     with pytest.raises(ToolNotFoundError):
         reg.get("no_such_tool", "1.0.0")
+
+
+def test_build_default_toolset_includes_verifier_and_task_log(tmp_path) -> None:
+    clock = StepClock(datetime(2026, 5, 1, tzinfo=UTC))
+    artifacts = ArtifactStore(tmp_path / "artifacts", clock)
+    receipts = ReceiptManager(tmp_path / "receipts", clock)
+    rollback = RollbackManager(artifacts, clock)
+    work_log = TaskWorkLog(EventStore(tmp_path / "events.jsonl", clock))
+
+    tools = build_default_toolset(
+        ask_user_channel=_DummyAsk(),
+        workspace_root=str(tmp_path),
+        receipts=receipts,
+        rollback=rollback,
+        work_log=work_log,
+    )
+
+    names = {tool.manifest.name for tool in tools}
+    assert "verify_file" in names
+    assert "read_task_log" in names
+    assert "patch_file" in names
+    assert "restore_file" in names

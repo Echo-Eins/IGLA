@@ -12,7 +12,9 @@ from igla.protocol.policy import ActionRequest, PolicyDecisionKind
 from igla.protocol.runtime import RuntimeMode
 from igla.tools.builtin.ask_user import AskUserTool
 from igla.tools.builtin.noop_observe import NoopObserveTool
+from igla.tools.builtin.read_task_log import ReadTaskLogTool
 from igla.tools.builtin.search import FindFilesTool
+from igla.tools.builtin.verify_file import VerifyFileTool
 
 
 class _DummyAsk:
@@ -202,6 +204,87 @@ def test_noop_observe_does_not_unlock_clarification(make_settings) -> None:
 
     assert decision.is_deny
     assert decision.rejection.reason_code == "MUST_DISCOVER_FIRST"
+
+
+def test_verify_file_does_not_unlock_clarification(make_settings) -> None:
+    """Verification validates known work; it is not workspace discovery."""
+    engine, kernel = _build(make_settings)
+    kernel.registry.register(
+        VerifyFileTool(workspace_root=str(kernel.workspace), receipts=kernel.receipts)
+    )
+    kernel.state.ensure_task("t1")
+    kernel.state.set_allowed_actions("t1", ["ask_user_clarification", "tool_invocation"])
+    kernel.events.append(
+        kind=EventKind.TOOL_INVOCATION_COMPLETED,
+        actor="tool:verify_file",
+        task_id="t1",
+        payload={
+            "tool_name": "verify_file",
+            "status": "success",
+            "output": {"path": "x.py", "overall_passed": True},
+        },
+    )
+    action = ActionRequest(
+        kind="ask_user_clarification",
+        actor="planner",
+        task_id="t1",
+        input={"question": "where is it?"},
+        reason="verify_file is not discovery",
+    )
+
+    decision = engine.check(action, kernel=kernel)
+
+    assert decision.is_deny
+    assert decision.rejection.reason_code == "MUST_DISCOVER_FIRST"
+
+
+def test_read_task_log_does_not_unlock_clarification(make_settings) -> None:
+    """Memory inspection is not a local discovery attempt."""
+    engine, kernel = _build(make_settings)
+    kernel.registry.register(ReadTaskLogTool(work_log=kernel.work_log))
+    kernel.state.ensure_task("t1")
+    kernel.state.set_allowed_actions("t1", ["ask_user_clarification", "tool_invocation"])
+    kernel.events.append(
+        kind=EventKind.TOOL_INVOCATION_COMPLETED,
+        actor="tool:read_task_log",
+        task_id="t1",
+        payload={"tool_name": "read_task_log", "status": "success", "output": {}},
+    )
+    action = ActionRequest(
+        kind="ask_user_clarification",
+        actor="planner",
+        task_id="t1",
+        input={"question": "where is it?"},
+        reason="task log is not discovery",
+    )
+
+    decision = engine.check(action, kernel=kernel)
+
+    assert decision.is_deny
+    assert decision.rejection.reason_code == "MUST_DISCOVER_FIRST"
+
+
+def test_no_blind_retry_allows_explicit_verify_file_diagnostic_tool(make_settings) -> None:
+    engine, kernel = _build(make_settings)
+    kernel.registry.register(
+        VerifyFileTool(workspace_root=str(kernel.workspace), receipts=kernel.receipts)
+    )
+    kernel.state.ensure_task("t1")
+    kernel.state.transition_mode("t1", RuntimeMode.FAILURE_DIAGNOSIS_REQUIRED)
+    kernel.state.set_allowed_actions("t1", ["tool:verify_file"])
+    action = ActionRequest(
+        kind="tool_invocation",
+        actor="planner",
+        task_id="t1",
+        tool_name="verify_file",
+        tool_version="1.0.0",
+        input={"path": "src/x.py"},
+        reason="diagnose a patch failure",
+    )
+
+    decision = engine.check(action, kernel=kernel)
+
+    assert decision.decision is PolicyDecisionKind.ALLOW
 
 
 def test_clarification_allowed_after_discovery_tool(make_settings) -> None:
